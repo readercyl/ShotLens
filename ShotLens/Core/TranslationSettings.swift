@@ -41,4 +41,13 @@ struct TranslationSettings {
         defaults.synchronize()
         NotificationCenter.default.post(name: Self.didChangeNotification, object: nil)
     }
+
+    static func resetSavedConfiguration() {
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: apiEndpointKey)
+        defaults.removeObject(forKey: apiKeyKey)
+        defaults.removeObject(forKey: modelKey)
+        defaults.synchronize()
+        NotificationCenter.default.post(name: didChangeNotification, object: nil)
+    }
 }

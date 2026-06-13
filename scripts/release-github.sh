@@ -28,6 +28,6 @@ git -C "$ROOT_DIR" push origin "$VERSION"
 gh release create "$VERSION" "$DMG_PATH" \
   --repo qcsidios/ShotLens \
   --title "ShotLens $VERSION" \
-  --notes "Friend-share DMG build. Install ShotLens.app into Applications, then use right-click Open on first launch because this package is not Apple-notarized."
+  --notes "ShotLens $VERSION release build."
 
 echo "$VERSION"

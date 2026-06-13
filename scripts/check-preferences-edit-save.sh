@@ -12,6 +12,8 @@ rg -n 'ShortcutRecorder' "$MAIN_WINDOW" >/dev/null
 rg -n 'API 翻译' "$MAIN_WINDOW" >/dev/null
 rg -n '设置会自动保存' "$MAIN_WINDOW" >/dev/null
 rg -n '所有翻译都走 API' "$MAIN_WINDOW" >/dev/null
+rg -n 'clearAPISettingsClicked|清空' "$MAIN_WINDOW" >/dev/null
+rg -n 'resetSavedConfiguration' "$SETTINGS" >/dev/null
 rg -n 'apiAvailabilityText' "$SETTINGS" >/dev/null
 rg -n 'isLLMConfigured' "$SETTINGS" "$PROVIDER" >/dev/null
 rg -n 'TranslationSettings\.didChangeNotification' "$MAIN_WINDOW" >/dev/null

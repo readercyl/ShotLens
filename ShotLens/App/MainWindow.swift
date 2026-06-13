@@ -228,6 +228,10 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         headerRow.addArrangedSubview(spacer)
+        let clearButton = NSButton(title: "清空", target: self, action: #selector(clearAPISettingsClicked))
+        clearButton.bezelStyle = .rounded
+        clearButton.widthAnchor.constraint(equalToConstant: 58).isActive = true
+        headerRow.addArrangedSubview(clearButton)
         let status = label("", font: .systemFont(ofSize: 12, weight: .semibold), color: .secondaryLabelColor)
         apiStatusLabel = status
         headerRow.addArrangedSubview(status)
@@ -395,6 +399,13 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             launchAtLoginCheckbox?.state = launchAtLoginEnabled ? .on : .off
             ShotLensLogger.log("更新开机自动启动失败", error: error)
         }
+    }
+
+    @objc private func clearAPISettingsClicked() {
+        pendingSave?.cancel()
+        TranslationSettings.resetSavedConfiguration()
+        loadSettings()
+        refreshStatus()
     }
 
     @objc private func settingsDidChange() {

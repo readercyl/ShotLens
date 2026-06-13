@@ -9,12 +9,14 @@ BUILD_SCRIPT="$ROOT_DIR/scripts/build-local.sh"
 DMG_SCRIPT="$ROOT_DIR/scripts/package-dmg.sh"
 NEXT_VERSION_SCRIPT="$ROOT_DIR/scripts/next-release-version.sh"
 PRIVATE_CONFIG_SCRIPT="$ROOT_DIR/scripts/check-no-private-config.sh"
+DMG_LAYOUT_SCRIPT="$ROOT_DIR/scripts/check-dmg-layout.sh"
 GITHUB_RELEASE_SCRIPT="$ROOT_DIR/scripts/release-github.sh"
 README="$ROOT_DIR/README.md"
 PROJECT="$ROOT_DIR/ShotLens.xcodeproj/project.pbxproj"
 
 test -x "$NEXT_VERSION_SCRIPT"
 test -x "$PRIVATE_CONFIG_SCRIPT"
+test -x "$DMG_LAYOUT_SCRIPT"
 test -x "$GITHUB_RELEASE_SCRIPT"
 
 rg -n 'APP_VERSION="\$\{SHOTLENS_APP_VERSION:-v1\.0\}"' "$BUILD_SCRIPT" >/dev/null
@@ -28,11 +30,17 @@ rg -n 'ShotLens-\$APP_VERSION\.dmg' "$DMG_SCRIPT" >/dev/null
 rg -n 'SHOTLENS_CODESIGN_IDENTITY:-' "$DMG_SCRIPT" >/dev/null
 rg -n 'SHOTLENS_APP_VERSION="\$APP_VERSION"' "$DMG_SCRIPT" >/dev/null
 rg -n 'codesign --verify --deep --strict' "$DMG_SCRIPT" >/dev/null
-rg -n 'spctl --assess --type execute' "$DMG_SCRIPT" >/dev/null
 rg -n 'hdiutil verify' "$DMG_SCRIPT" >/dev/null
 rg -n 'check-no-private-config\.sh' "$DMG_SCRIPT" "$README" >/dev/null
-rg -n '安装说明-右键打开\.txt' "$DMG_SCRIPT" >/dev/null
-rg -n 'right-click Open|右键' "$DMG_SCRIPT" "$README" >/dev/null
+rg -n 'check-dmg-layout\.sh' "$DMG_SCRIPT" "$README" >/dev/null
+if rg -n '安装说明|right-click|右键|Apple-notarized|notarized|notarytool|stapler|SHOTLENS_NOTARY_PROFILE|Set SHOTLENS_CODESIGN_IDENTITY|spctl --assess' "$DMG_SCRIPT" "$README" "$GITHUB_RELEASE_SCRIPT"; then
+  echo "Release packaging must stay simple: no installer notes, notarization instructions, or Gatekeeper assessment step." >&2
+  exit 1
+fi
+if rg -n '安装说明|\\.txt' "$DMG_SCRIPT"; then
+  echo "DMG must not include installer text files." >&2
+  exit 1
+fi
 if rg -n 'notarytool|stapler|SHOTLENS_NOTARY_PROFILE|Set SHOTLENS_CODESIGN_IDENTITY' "$DMG_SCRIPT" "$README"; then
   echo "Friend-share packaging must not require Apple notarization or a Developer ID identity." >&2
   exit 1
@@ -55,6 +63,7 @@ rg -n 'import ServiceManagement' "$MAIN" "$APP" >/dev/null
 rg -n 'SMAppService\.mainApp' "$MAIN" "$APP" >/dev/null
 rg -n '开机自动启动' "$MAIN" >/dev/null
 rg -n 'launchAtLogin' "$MAIN" "$APP" >/dev/null
+rg -n 'resetSavedConfiguration|clearAPISettingsClicked|清空' "$MAIN" "$ROOT_DIR/ShotLens/Core/TranslationSettings.swift" >/dev/null
 
 rg -n 'statusItem\(withLength: NSStatusItem\.squareLength\)' "$APP" >/dev/null
 rg -n 'let text = "译"' "$APP" "$MAIN" "$ICON_GENERATOR" >/dev/null

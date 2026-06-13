@@ -16,6 +16,7 @@ BUILD_SCRIPT="$ROOT_DIR/scripts/build-local.sh"
 DMG_SCRIPT="$ROOT_DIR/scripts/package-dmg.sh"
 NEXT_VERSION_SCRIPT="$ROOT_DIR/scripts/next-release-version.sh"
 PRIVATE_CONFIG_SCRIPT="$ROOT_DIR/scripts/check-no-private-config.sh"
+DMG_LAYOUT_SCRIPT="$ROOT_DIR/scripts/check-dmg-layout.sh"
 
 if [[ -e "$ROOT_DIR/ShotLens/Core/SelectionOverlay.swift" ]]; then
   echo "Old in-process SelectionOverlay must be removed; ShotLensSelect owns selection." >&2
@@ -32,6 +33,7 @@ fi
 
 test -x "$NEXT_VERSION_SCRIPT"
 test -x "$PRIVATE_CONFIG_SCRIPT"
+test -x "$DMG_LAYOUT_SCRIPT"
 rg -n 'APP_VERSION="\$\{SHOTLENS_APP_VERSION:-v1\.0\}"' "$BUILD_SCRIPT" >/dev/null
 rg -n 'BUNDLE_SHORT_VERSION="\$\{APP_VERSION#v\}"' "$BUILD_SCRIPT" >/dev/null
 rg -n 'APP_BUILD="\$\{SHOTLENS_APP_BUILD:-1\}"' "$BUILD_SCRIPT" >/dev/null
@@ -44,6 +46,11 @@ rg -n 'next-release-version\.sh' "$DMG_SCRIPT" >/dev/null
 rg -n 'hdiutil create' "$DMG_SCRIPT" >/dev/null
 rg -n 'ShotLens-\$APP_VERSION\.dmg' "$DMG_SCRIPT" >/dev/null
 rg -n 'check-no-private-config\.sh' "$DMG_SCRIPT" >/dev/null
+rg -n 'check-dmg-layout\.sh' "$DMG_SCRIPT" >/dev/null
+if rg -n '安装说明|right-click|右键|Apple-notarized|notarized|notarytool|stapler|SHOTLENS_NOTARY_PROFILE|Set SHOTLENS_CODESIGN_IDENTITY|spctl --assess' "$DMG_SCRIPT" "$ROOT_DIR/README.md" "$ROOT_DIR/scripts/release-github.sh"; then
+  echo "Release flow must stay simple: no installer notes or Apple notarization/Gatekeeper instructions." >&2
+  exit 1
+fi
 
 rg -n 'capture\(selection' "$CAPTURE" >/dev/null
 rg -n 'hasScreenCaptureAccess\(\)' "$APP" >/dev/null
@@ -61,6 +68,7 @@ if rg -n 'Task\.sleep\(nanoseconds: 100_000_000\)' "$APP"; then
 fi
 sed -n '/func applicationDidFinishLaunching/,/func applicationShouldTerminateAfterLastWindowClosed/p' "$APP" | rg -n 'openMainWindow\(' >/dev/null
 rg -n 'ShotLens 控制台' "$MAIN" >/dev/null
+rg -n 'clearAPISettingsClicked|resetSavedConfiguration|清空' "$MAIN" "$SETTINGS" >/dev/null
 rg -n 'disableAutomaticTermination' "$APP" >/dev/null
 rg -n 'makeMenuBarTemplateIcon\(\)' "$APP" >/dev/null
 rg -n 'statusItem\(withLength: NSStatusItem\.squareLength\)' "$APP" >/dev/null
