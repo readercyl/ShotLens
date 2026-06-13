@@ -8,7 +8,10 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private var apiStatusLabel: NSTextField?
     private var launchAtLoginCheckbox: NSButton?
     private let apiEndpointField = NSTextField()
-    private let apiKeyField = NSTextField()
+    private let apiKeyRealField = NSTextField()
+    private let apiKeySecureField = NSSecureTextField()
+    private let apiKeyEyeButton = NSButton()
+    private var isApiKeyVisible = false
     private let modelField = NSTextField()
     private var pendingSave: DispatchWorkItem?
 
@@ -238,11 +241,12 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         card.addArrangedSubview(headerRow)
 
         configureField(apiEndpointField, placeholder: "OpenAI-compatible chat completions endpoint")
-        configureField(apiKeyField, placeholder: "API Key")
+        configureField(apiKeyRealField, placeholder: "API Key")
+        configureField(apiKeySecureField, placeholder: "API Key")
         configureField(modelField, placeholder: "model")
 
         card.addArrangedSubview(fieldRow("地址", field: apiEndpointField))
-        card.addArrangedSubview(fieldRow("Key", field: apiKeyField))
+        card.addArrangedSubview(apiKeyFieldRow())
         card.addArrangedSubview(fieldRow("模型", field: modelField))
 
         let note = label("所有翻译都走 API；OCR 会先按语义合并文本块。", font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
@@ -296,6 +300,75 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         field.heightAnchor.constraint(equalToConstant: 28).isActive = true
     }
 
+    private func apiKeyFieldRow() -> NSView {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 10
+        row.widthAnchor.constraint(equalToConstant: 404).isActive = true
+
+        let titleLabel = label("Key", font: .systemFont(ofSize: 13), color: .secondaryLabelColor)
+        titleLabel.widthAnchor.constraint(equalToConstant: 38).isActive = true
+
+        // 两个 field 叠放在同一容器里，一次只显示一个
+        let fieldContainer = NSView()
+        fieldContainer.translatesAutoresizingMaskIntoConstraints = false
+        fieldContainer.widthAnchor.constraint(equalToConstant: 328).isActive = true
+        fieldContainer.heightAnchor.constraint(equalToConstant: 28).isActive = true
+
+        apiKeyRealField.frame = fieldContainer.bounds
+        apiKeyRealField.autoresizingMask = [.width, .height]
+        apiKeySecureField.frame = fieldContainer.bounds
+        apiKeySecureField.autoresizingMask = [.width, .height]
+        apiKeySecureField.isHidden = true
+
+        fieldContainer.addSubview(apiKeyRealField)
+        fieldContainer.addSubview(apiKeySecureField)
+
+        // 眼睛图标按钮
+        apiKeyEyeButton.bezelStyle = .inline
+        apiKeyEyeButton.isBordered = false
+        apiKeyEyeButton.imagePosition = .imageOnly
+        apiKeyEyeButton.target = self
+        apiKeyEyeButton.action = #selector(toggleApiKeyVisibility)
+        apiKeyEyeButton.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        apiKeyEyeButton.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        updateApiKeyEyeIcon()
+
+        row.addArrangedSubview(titleLabel)
+        row.addArrangedSubview(fieldContainer)
+        row.addArrangedSubview(apiKeyEyeButton)
+        return row
+    }
+
+    @objc private func toggleApiKeyVisibility() {
+        isApiKeyVisible.toggle()
+
+        if isApiKeyVisible {
+            // 切换到明码：把真实值从 real field 同步到 secure field（反向不需要）
+            // 隐藏 secure field，显示 real field
+            apiKeySecureField.isHidden = true
+            apiKeyRealField.isHidden = false
+            apiKeyRealField.stringValue = apiKeySecureField.stringValue
+            // 让 real field 成为第一响应者
+            window?.makeFirstResponder(apiKeyRealField)
+        } else {
+            // 切换到保密：把真实值同步到 secure field，显示 secure field
+            apiKeySecureField.stringValue = apiKeyRealField.stringValue
+            apiKeyRealField.isHidden = true
+            apiKeySecureField.isHidden = false
+            window?.makeFirstResponder(apiKeySecureField)
+        }
+
+        updateApiKeyEyeIcon()
+    }
+
+    private func updateApiKeyEyeIcon() {
+        let symbolName = isApiKeyVisible ? "eye.slash" : "eye"
+        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+        apiKeyEyeButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?.withSymbolConfiguration(config)
+    }
+
     private func fieldRow(_ title: String, field: NSTextField) -> NSView {
         let row = NSStackView()
         row.orientation = .horizontal
@@ -335,7 +408,8 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private func loadSettings() {
         let settings = TranslationSettings.load()
         apiEndpointField.stringValue = settings.apiEndpoint
-        apiKeyField.stringValue = settings.apiKey
+        apiKeyRealField.stringValue = settings.apiKey
+        apiKeySecureField.stringValue = settings.apiKey
         modelField.stringValue = settings.model
         launchAtLoginCheckbox?.state = launchAtLoginEnabled ? .on : .off
     }
@@ -362,7 +436,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private func currentDraftSettings() -> TranslationSettings {
         TranslationSettings(
             apiEndpoint: apiEndpointField.stringValue,
-            apiKey: apiKeyField.stringValue,
+            apiKey: apiKeyRealField.stringValue,
             model: modelField.stringValue
         )
     }
@@ -419,6 +493,14 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     }
 
     func controlTextDidChange(_ obj: Notification) {
+        // 双向同步 Key 的两个 field
+        if let field = obj.object as? NSTextField {
+            if field === apiKeyRealField {
+                apiKeySecureField.stringValue = apiKeyRealField.stringValue
+            } else if field === apiKeySecureField {
+                apiKeyRealField.stringValue = apiKeySecureField.stringValue
+            }
+        }
         refreshStatus()
         saveSettingsSoon()
     }
