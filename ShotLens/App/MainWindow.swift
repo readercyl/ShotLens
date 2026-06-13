@@ -227,7 +227,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         headerRow.spacing = 10
         headerRow.widthAnchor.constraint(equalToConstant: 404).isActive = true
 
-        headerRow.addArrangedSubview(label("API 翻译", font: .systemFont(ofSize: 15, weight: .semibold)))
+        headerRow.addArrangedSubview(label("API 信息", font: .systemFont(ofSize: 15, weight: .semibold)))
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         headerRow.addArrangedSubview(spacer)
@@ -313,16 +313,15 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         // 文本框容器：与地址/模型等宽 356，眼图标叠在内部右侧
         let containerW: CGFloat = 356
         let containerH: CGFloat = 28
-        let eyeW: CGFloat = 24
-        let eyeInset: CGFloat = 4
+        let eyeW: CGFloat = 22
 
         let fieldContainer = NSView()
         fieldContainer.translatesAutoresizingMaskIntoConstraints = false
         fieldContainer.widthAnchor.constraint(equalToConstant: containerW).isActive = true
         fieldContainer.heightAnchor.constraint(equalToConstant: containerH).isActive = true
 
-        // 文本框右侧留空给眼图标
-        let fieldFrame = NSRect(x: 0, y: 0, width: containerW - eyeW - eyeInset, height: containerH)
+        // 文本框撑满容器，和地址/模型等宽
+        let fieldFrame = NSRect(x: 0, y: 0, width: containerW, height: containerH)
         [apiKeyRealField, apiKeySecureField].forEach { field in
             field.frame = fieldFrame
             field.autoresizingMask = [.width, .height]
@@ -335,14 +334,14 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         fieldContainer.addSubview(apiKeyRealField)
         fieldContainer.addSubview(apiKeySecureField)
 
-        // 眼睛图标：贴在容器内部右侧，垂直居中
+        // 眼睛图标：盖在文本框右侧内部
         apiKeyEyeButton.bezelStyle = .inline
         apiKeyEyeButton.isBordered = false
         apiKeyEyeButton.imagePosition = .imageOnly
         apiKeyEyeButton.target = self
         apiKeyEyeButton.action = #selector(toggleApiKeyVisibility)
         apiKeyEyeButton.frame = NSRect(
-            x: containerW - eyeW - 2,
+            x: containerW - eyeW - 4,
             y: (containerH - eyeW) / 2,
             width: eyeW,
             height: eyeW
