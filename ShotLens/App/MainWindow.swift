@@ -1,8 +1,10 @@
 import AppKit
 import CoreGraphics
+import QuartzCore
 import ServiceManagement
 
 final class MainWindowController: NSObject, NSTextFieldDelegate {
+    private static let apiDetailsExpandedKey = "ShotLens_API_DetailsExpanded"
     private var window: NSWindow?
     private var permissionStatusLabel: NSTextField?
     private var apiStatusLabel: NSTextField?
@@ -10,6 +12,9 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private var launchAtLoginCheckbox: NSButton?
     private let checkUpdateButton = NSButton()
     private let installUpdateButton = NSButton()
+    private let toggleAPIButton = NSButton()
+    private var apiDetailsContainer: NSStackView?
+    private var isApiDetailsExpanded = UserDefaults.standard.bool(forKey: MainWindowController.apiDetailsExpandedKey)
     private let apiEndpointField = NSTextField()
     private let apiKeyField = NSTextField()
     private var apiKeyValue = ""
@@ -122,6 +127,8 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         root.addArrangedSubview(makeAPICard())
         root.addArrangedSubview(makeFooter())
 
+        updateAPIExpandedState()
+        updateWindowHeight(animated: false)
         window.center()
         return window
     }
@@ -162,6 +169,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         checkUpdateButton.bezelStyle = .inline
         checkUpdateButton.isBordered = false
         checkUpdateButton.imagePosition = .imageOnly
+        checkUpdateButton.wantsLayer = true
         checkUpdateButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "检查更新")?.withSymbolConfiguration(config)
         checkUpdateButton.toolTip = "检查新版本"
         checkUpdateButton.target = self
@@ -286,29 +294,53 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         headerRow.addArrangedSubview(spacer)
-        let clearButton = NSButton(title: "清空", target: self, action: #selector(clearAPISettingsClicked))
-        clearButton.bezelStyle = .rounded
-        clearButton.widthAnchor.constraint(equalToConstant: 58).isActive = true
-        headerRow.addArrangedSubview(clearButton)
-        let testButton = NSButton(title: "测试", target: self, action: #selector(testConnectionClicked))
-        testButton.bezelStyle = .rounded
-        testButton.widthAnchor.constraint(equalToConstant: 58).isActive = true
-        headerRow.addArrangedSubview(testButton)
         let status = label("", font: .systemFont(ofSize: 12, weight: .semibold), color: .secondaryLabelColor)
         apiStatusLabel = status
         headerRow.addArrangedSubview(status)
+        toggleAPIButton.bezelStyle = .rounded
+        toggleAPIButton.target = self
+        toggleAPIButton.action = #selector(toggleAPIExpandedClicked)
+        toggleAPIButton.widthAnchor.constraint(equalToConstant: 64).isActive = true
+        headerRow.addArrangedSubview(toggleAPIButton)
         card.addArrangedSubview(headerRow)
 
         configureField(apiEndpointField, placeholder: "")
         configureField(modelField, placeholder: "")
 
-        card.addArrangedSubview(fieldRow("地址", field: apiEndpointField))
-        card.addArrangedSubview(apiKeyFieldRow())
-        card.addArrangedSubview(modelFieldRow())
+        let details = NSStackView()
+        details.orientation = .vertical
+        details.alignment = .leading
+        details.distribution = .fill
+        details.spacing = 8
+        details.widthAnchor.constraint(equalToConstant: 404).isActive = true
+        apiDetailsContainer = details
+
+        let actionRow = NSStackView()
+        actionRow.orientation = .horizontal
+        actionRow.alignment = .centerY
+        actionRow.spacing = 8
+        actionRow.widthAnchor.constraint(equalToConstant: 404).isActive = true
+        let actionSpacer = NSView()
+        actionSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let clearButton = NSButton(title: "清空", target: self, action: #selector(clearAPISettingsClicked))
+        clearButton.bezelStyle = .rounded
+        clearButton.widthAnchor.constraint(equalToConstant: 58).isActive = true
+        let testButton = NSButton(title: "测试", target: self, action: #selector(testConnectionClicked))
+        testButton.bezelStyle = .rounded
+        testButton.widthAnchor.constraint(equalToConstant: 58).isActive = true
+        actionRow.addArrangedSubview(actionSpacer)
+        actionRow.addArrangedSubview(clearButton)
+        actionRow.addArrangedSubview(testButton)
+
+        details.addArrangedSubview(fieldRow("地址", field: apiEndpointField))
+        details.addArrangedSubview(apiKeyFieldRow())
+        details.addArrangedSubview(modelFieldRow())
+        details.addArrangedSubview(actionRow)
 
         let note = label("Key 留空时使用默认福利额度；\(TranslationSettings.limitedFreeModelNotice)", font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
         note.lineBreakMode = .byTruncatingTail
-        card.addArrangedSubview(note)
+        details.addArrangedSubview(note)
+        card.addArrangedSubview(details)
         return card
     }
 
@@ -514,6 +546,21 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         return field
     }
 
+    private func updateAPIExpandedState() {
+        apiDetailsContainer?.isHidden = !isApiDetailsExpanded
+        toggleAPIButton.title = isApiDetailsExpanded ? "收起" : "展开"
+    }
+
+    private func updateWindowHeight(animated: Bool) {
+        guard let window else { return }
+        let targetHeight: CGFloat = isApiDetailsExpanded ? 560 : 430
+        var frame = window.frame
+        guard abs(frame.height - targetHeight) > 0.5 else { return }
+        frame.origin.y += frame.height - targetHeight
+        frame.size.height = targetHeight
+        window.setFrame(frame, display: true, animate: animated)
+    }
+
     private var displayVersion: String {
         let shortVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
         let normalized = shortVersion?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -540,6 +587,8 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
         // 不自动测试，等用户手动点击「测试」按钮
         connectionState = .untested
+        updateAPIExpandedState()
+        updateWindowHeight(animated: false)
         refreshStatus()
     }
 
@@ -641,6 +690,13 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         refreshStatus()
     }
 
+    @objc private func toggleAPIExpandedClicked() {
+        isApiDetailsExpanded.toggle()
+        UserDefaults.standard.set(isApiDetailsExpanded, forKey: Self.apiDetailsExpandedKey)
+        updateAPIExpandedState()
+        updateWindowHeight(animated: true)
+    }
+
     // MARK: - 更新检查
 
     @objc private func checkForUpdatesClicked() {
@@ -648,6 +704,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         availableUpdate = nil
         installUpdateButton.isHidden = true
         checkUpdateButton.isEnabled = false
+        startUpdateButtonRotation()
         updateStatusLabel?.stringValue = "检查中…"
         updateStatusLabel?.textColor = .secondaryLabelColor
 
@@ -662,6 +719,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     private func applyUpdateCheckResult(_ result: AppUpdateCheckResult) {
         checkUpdateButton.isEnabled = true
+        stopUpdateButtonRotation()
         switch result {
         case .available(let update):
             availableUpdate = update
@@ -696,6 +754,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
                 guard !Task.isCancelled, let controller = self else { return }
                 await MainActor.run {
                     do {
+                        controller.updateStatusLabel?.stringValue = "安装中…"
                         try updater.installDownloadedUpdate(from: dmgURL)
                     } catch {
                         controller.showUpdateInstallFailure()
@@ -715,6 +774,20 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         installUpdateButton.isEnabled = true
         updateStatusLabel?.stringValue = "升级失败，请使用发布文档"
         updateStatusLabel?.textColor = .systemRed
+    }
+
+    private func startUpdateButtonRotation() {
+        checkUpdateButton.layer?.removeAnimation(forKey: "shotlens.update.spin")
+        let animation = CABasicAnimation(keyPath: "transform.rotation.z")
+        animation.fromValue = 0
+        animation.toValue = CGFloat.pi * 2
+        animation.duration = 0.8
+        animation.repeatCount = .infinity
+        checkUpdateButton.layer?.add(animation, forKey: "shotlens.update.spin")
+    }
+
+    private func stopUpdateButtonRotation() {
+        checkUpdateButton.layer?.removeAnimation(forKey: "shotlens.update.spin")
     }
 
     private func markUntested() {

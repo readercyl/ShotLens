@@ -28,8 +28,22 @@ struct TranslationEndpointSmoke {
             expectedPath: "/v1/chat/completions",
             assistantContent: "0: 你好\n1: 世界"
         )
+        try await assertTranslates(
+            endpoint: "https://shotlens-test.local/v1",
+            expectedPath: "/v1/chat/completions",
+            assistantContent: #"["你好","世界"]"#
+        )
+        try await assertTranslates(
+            endpoint: "https://shotlens-test.local/v1",
+            expectedPath: "/v1/chat/completions",
+            assistantContent: "你好\n世界"
+        )
+        try await assertSingleBlockPlainTextParses()
+        try await assertRepairRequestFixesInvalidBatchResponse()
+        try await assertSingleItemFallbackRecoversWhenRepairFails()
         try await assertEmptySavedSettingsUseDefaultAPI()
         try await assertConnectionCheckUsesChatCompletions()
+        try await assertConnectionCheckRejectsInvalidTranslationFormat()
 
         print("Translation endpoint smoke test passed.")
     }
@@ -124,6 +138,85 @@ struct TranslationEndpointSmoke {
         }
     }
 
+    private static func assertConnectionCheckRejectsInvalidTranslationFormat() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContentQueue = ["Here is the answer: OK", "Still invalid"]
+
+        let checker = LLMConnectionChecker(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+
+        let isAvailable = await checker.isAvailable()
+        guard !isAvailable else {
+            throw TestFailure("Expected connection check to reject unparseable translation content")
+        }
+    }
+
+    private static func assertSingleBlockPlainTextParses() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContent = "你好"
+
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+
+        let result = try await translator.translate(["Hello"], from: "en", to: "zh-Hans")
+        guard result == ["你好"] else {
+            throw TestFailure("Expected single plain text response to parse, got \(result)")
+        }
+    }
+
+    private static func assertRepairRequestFixesInvalidBatchResponse() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContentQueue = [
+            "Here are the translations:\nHello => 你好\nWorld => 世界",
+            #"["你好","世界"]"#
+        ]
+
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+
+        let result = try await translator.translate(["Hello", "World"], from: "en", to: "zh-Hans")
+        guard result == ["你好", "世界"] else {
+            throw TestFailure("Expected repair request to recover JSON array, got \(result)")
+        }
+        guard MockOpenAIProtocol.requestBodies.count == 2,
+              MockOpenAIProtocol.requestBodies[1].contains("Convert this model output") else {
+            throw TestFailure("Expected second request to be a format repair request")
+        }
+    }
+
+    private static func assertSingleItemFallbackRecoversWhenRepairFails() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContentQueue = [
+            "Translations: hello and world",
+            "Still not JSON",
+            "你好",
+            "世界"
+        ]
+
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+
+        let result = try await translator.translate(["Hello", "World"], from: "en", to: "zh-Hans")
+        guard result == ["你好", "世界"] else {
+            throw TestFailure("Expected per-item fallback to recover translations, got \(result)")
+        }
+        guard MockOpenAIProtocol.requestBodies.count == 4 else {
+            throw TestFailure("Expected batch, repair, and two single-item requests, got \(MockOpenAIProtocol.requestBodies.count)")
+        }
+    }
+
     private static func restore(_ value: Any?, forKey key: String) {
         let defaults = UserDefaults.standard
         if let value {
@@ -141,6 +234,7 @@ private final class MockOpenAIProtocol: URLProtocol {
     private static var authorizations: [String] = []
     private static var bodies: [String] = []
     static var assistantContent = "0\t你好\n1\t世界"
+    static var assistantContentQueue: [String] = []
     static var chatStatusCode = 200
     static var modelsStatusCode = 200
 
@@ -175,6 +269,7 @@ private final class MockOpenAIProtocol: URLProtocol {
         authorizations = []
         bodies = []
         assistantContent = "0\t你好\n1\t世界"
+        assistantContentQueue = []
         chatStatusCode = 200
         modelsStatusCode = 200
         lock.unlock()
@@ -190,8 +285,13 @@ private final class MockOpenAIProtocol: URLProtocol {
 
     override func startLoading() {
         let path = request.url?.path ?? ""
-        let content = Self.assistantContent
+        let content: String
         Self.lock.lock()
+        if Self.assistantContentQueue.isEmpty {
+            content = Self.assistantContent
+        } else {
+            content = Self.assistantContentQueue.removeFirst()
+        }
         Self.hosts.append(request.url?.host ?? "")
         Self.paths.append(path)
         Self.authorizations.append(request.value(forHTTPHeaderField: "Authorization") ?? "")

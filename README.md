@@ -15,7 +15,7 @@ ShotLens 是一个轻量级 macOS 菜单栏截图翻译工具。
 - 模型字段可选：填写时显式传入，留空时由 API 服务商使用默认行为
 - 针对 UI 文本、菜单、段落、文章和混合截图的布局感知渲染
 - 可拖动的结果浮窗，支持重试、原文/译文切换、复制截图和纯文本译文
-- 简洁控制台，用于查看权限、快捷键、开机启动和 API 设置
+- 简洁控制台，用于查看权限、快捷键、开机启动和折叠式 API 设置
 - 应用图标与 macOS 菜单栏模板图标
 - 控制台内手动检查 GitHub Release 新版本并升级
 
@@ -30,7 +30,7 @@ ShotLens 是一个轻量级 macOS 菜单栏截图翻译工具。
 
 1. 启动 ShotLens 后，在菜单栏打开控制台。
 2. 默认 API 地址和模型已预置，Key 留空时使用默认福利额度。
-3. 如需使用自己的额度，可在“API 信息”里填写 API 密钥，也可以改 API 地址和模型。
+3. API 信息默认收起；如需使用自己的额度，可展开“API 信息”填写 API 密钥，也可以改 API 地址和模型。
 4. 点击“测试”确认当前配置可用。
 5. 授予屏幕录制权限。
 6. 使用全局快捷键或菜单栏按钮开始截图翻译。
@@ -80,6 +80,7 @@ bash scripts/package-dmg.sh
 ```bash
 bash scripts/check-translation-endpoint.sh
 bash scripts/check-app-updater.sh
+bash scripts/check-compact-ui.sh
 bash scripts/check-project-integrity.sh
 bash scripts/build-local.sh
 bash scripts/check-no-private-config.sh
@@ -90,6 +91,7 @@ bash scripts/check-dmg-layout.sh
 
 - `check-translation-endpoint.sh`：验证 API 地址规范化、翻译返回解析和连接测试链路。
 - `check-app-updater.sh`：验证 GitHub Release 新版本检测、版本比较和异常状态。
+- `check-compact-ui.sh`：验证 API 详情默认折叠和更新按钮旋转反馈入口。
 - `check-project-integrity.sh`：检查关键项目文件、OCR 辅助进程、框选辅助进程和 Xcode 引用是否完整。
 - `build-local.sh`：执行本地构建。
 - `check-no-private-config.sh`：检查构建产物里没有泄露本机 API 配置。

@@ -5,10 +5,66 @@ struct LLMTranslator: TranslationProvider {
     let settings: TranslationSettings
 
     func translate(_ texts: [String], from sourceLanguage: String, to targetLanguage: String) async throws -> [String] {
+        try await translate(
+            texts,
+            from: sourceLanguage,
+            to: targetLanguage,
+            allowsSingleItemFallback: true
+        )
+    }
+
+    func validateTranslationFormat(from sourceLanguage: String, to targetLanguage: String) async throws {
+        _ = try await translate(
+            ["Hello", "World"],
+            from: sourceLanguage,
+            to: targetLanguage,
+            allowsSingleItemFallback: false
+        )
+    }
+
+    private func translate(
+        _ texts: [String],
+        from sourceLanguage: String,
+        to targetLanguage: String,
+        allowsSingleItemFallback: Bool
+    ) async throws -> [String] {
         guard settings.isLLMConfigured else {
             throw TranslationError.llmNotConfigured
         }
 
+        let content = try await requestAssistantContent(
+            systemPrompt: primarySystemPrompt(targetLanguage: targetLanguage),
+            userPayload: try makeUserPayload(texts: texts, sourceLanguage: sourceLanguage, targetLanguage: targetLanguage)
+        )
+
+        do {
+            return try parseTranslations(from: content, expectedCount: texts.count)
+        } catch {
+            let repairedContent = try await requestAssistantContent(
+                systemPrompt: repairSystemPrompt(expectedCount: texts.count),
+                userPayload: makeRepairPayload(
+                    content: content,
+                    expectedCount: texts.count,
+                    targetLanguage: targetLanguage
+                )
+            )
+
+            do {
+                return try parseTranslations(from: repairedContent, expectedCount: texts.count)
+            } catch {
+                guard allowsSingleItemFallback, texts.count > 1 else {
+                    throw error
+                }
+                return try await translateItemsIndividually(
+                    texts,
+                    from: sourceLanguage,
+                    to: targetLanguage
+                )
+            }
+        }
+    }
+
+    private func requestAssistantContent(systemPrompt: String, userPayload: String) async throws -> String {
         guard let url = settings.chatCompletionsURL else {
             throw TranslationError.invalidLLMEndpoint
         }
@@ -18,17 +74,16 @@ struct LLMTranslator: TranslationProvider {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(settings.effectiveAPIKey)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 45
-
         var payload: [String: Any] = [
             "temperature": 0,
             "messages": [
                 [
                     "role": "system",
-                    "content": "Translate numbered OCR blocks to \(targetLanguage). Use literal translation. Do not polish. Do not rewrite. Return only numbered TSV lines: index<TAB>translation. Keep the same indexes and count. Translate every block completely. Do not omit, truncate, merge, summarize, or explain."
+                    "content": systemPrompt
                 ],
                 [
                     "role": "user",
-                    "content": try makeUserPayload(texts: texts, sourceLanguage: sourceLanguage, targetLanguage: targetLanguage)
+                    "content": userPayload
                 ]
             ]
         ]
@@ -43,12 +98,15 @@ struct LLMTranslator: TranslationProvider {
             throw TranslationError.llmHTTPError(statusCode: http.statusCode, body: body)
         }
 
-        let content = try parseAssistantContent(from: data)
-        let translated = try parseTranslations(from: content, expectedCount: texts.count)
-        guard translated.count == texts.count else {
-            throw TranslationError.llmResponseCountMismatch(expected: texts.count, actual: translated.count)
-        }
-        return translated
+        return try parseAssistantContent(from: data)
+    }
+
+    private func primarySystemPrompt(targetLanguage: String) -> String {
+        "Translate OCR text blocks to \(targetLanguage). Return only a valid JSON string array. The array length must equal the input block count. Each array item must be the literal translation of the matching block. Do not return Markdown, numbering, explanations, objects, or extra text."
+    }
+
+    private func repairSystemPrompt(expectedCount: Int) -> String {
+        "Convert this model output into only a valid JSON string array with exactly \(expectedCount) strings. Do not translate again. Do not add explanations, Markdown, keys, or numbering."
     }
 
     private func makeUserPayload(texts: [String], sourceLanguage: String, targetLanguage: String) throws -> String {
@@ -63,6 +121,28 @@ struct LLMTranslator: TranslationProvider {
         return lines.joined(separator: "\n")
     }
 
+    private func makeRepairPayload(content: String, expectedCount: Int, targetLanguage: String) -> String {
+        [
+            "target=\(targetLanguage)",
+            "expected_count=\(expectedCount)",
+            "Convert this model output to JSON string array only:",
+            content
+        ].joined(separator: "\n")
+    }
+
+    private func translateItemsIndividually(_ texts: [String], from sourceLanguage: String, to targetLanguage: String) async throws -> [String] {
+        var translated: [String] = []
+        translated.reserveCapacity(texts.count)
+        for text in texts {
+            let content = try await requestAssistantContent(
+                systemPrompt: primarySystemPrompt(targetLanguage: targetLanguage),
+                userPayload: try makeUserPayload(texts: [text], sourceLanguage: sourceLanguage, targetLanguage: targetLanguage)
+            )
+            translated.append(try parseTranslations(from: content, expectedCount: 1)[0])
+        }
+        return translated
+    }
+
     private func parseAssistantContent(from data: Data) throws -> String {
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choices = root["choices"] as? [[String: Any]],
@@ -75,10 +155,19 @@ struct LLMTranslator: TranslationProvider {
     }
 
     private func parseTranslations(from content: String, expectedCount: Int) throws -> [String] {
+        if let values = parseStringArrayIfPresent(from: content), values.count == expectedCount {
+            return values
+        }
         if let lines = parseNumberedLines(from: content, expectedCount: expectedCount) {
             return lines
         }
-        return try parseStringArray(from: content)
+        if let lines = parseUnnumberedLines(from: content, expectedCount: expectedCount) {
+            return lines
+        }
+        if expectedCount == 1, let plainText = parseSinglePlainText(from: content) {
+            return [plainText]
+        }
+        throw TranslationError.invalidLLMResponse
     }
 
     private func parseNumberedLines(from content: String, expectedCount: Int) -> [String]? {
@@ -140,7 +229,7 @@ struct LLMTranslator: TranslationProvider {
         return (index, text)
     }
 
-    private func parseStringArray(from content: String) throws -> [String] {
+    private func parseStringArrayIfPresent(from content: String) -> [String]? {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         let jsonText: String
 
@@ -159,9 +248,42 @@ struct LLMTranslator: TranslationProvider {
 
         guard let data = jsonText.data(using: .utf8),
               let values = try? JSONSerialization.jsonObject(with: data) as? [String] else {
-            throw TranslationError.invalidLLMResponse
+            return nil
         }
         return values
+    }
+
+    private func parseUnnumberedLines(from content: String, expectedCount: Int) -> [String]? {
+        let lines = content
+            .replacingOccurrences(of: "```text", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard lines.count == expectedCount else { return nil }
+        guard !lines.contains(where: looksLikeExplanation) else { return nil }
+        return lines
+    }
+
+    private func parseSinglePlainText(from content: String) -> String? {
+        let text = content
+            .replacingOccurrences(of: "```text", with: "")
+            .replacingOccurrences(of: "```", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty,
+              !text.contains("\n"),
+              !looksLikeExplanation(text) else {
+            return nil
+        }
+        return text
+    }
+
+    private func looksLikeExplanation(_ text: String) -> Bool {
+        let lowercased = text.lowercased()
+        return lowercased.hasPrefix("here ")
+            || lowercased.hasPrefix("sure")
+            || lowercased.hasPrefix("translation")
+            || lowercased.contains("=>")
     }
 }
 

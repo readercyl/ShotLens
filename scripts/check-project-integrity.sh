@@ -13,6 +13,7 @@ required_files=(
   "$ROOT_DIR/Tests/TranslationEndpointSmoke.swift"
   "$ROOT_DIR/Tests/AppUpdaterSmoke.swift"
   "$ROOT_DIR/scripts/check-app-updater.sh"
+  "$ROOT_DIR/scripts/check-compact-ui.sh"
 )
 
 for file in "${required_files[@]}"; do
