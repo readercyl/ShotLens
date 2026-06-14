@@ -5,6 +5,8 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_BUNDLE="${2:-$ROOT_DIR/build/local/ShotLens.app}"
 DMG_PATH="${1:-$ROOT_DIR/build/release/ShotLens-$("$ROOT_DIR/scripts/next-release-version.sh").dmg}"
 DEFAULTS_DOMAIN="com.qingcheng.shotlens"
+PUBLIC_DEFAULT_API_ENDPOINT="https://api.siliconflow.cn/v1"
+PUBLIC_DEFAULT_API_KEY="sk-iiwyxcrwfaiqixpbfitsogijhfjsiolqtntqszuixgohjpnb"
 
 read_default() {
   defaults read "$DEFAULTS_DOMAIN" "$1" 2>/dev/null || true
@@ -16,6 +18,9 @@ check_literal_absent() {
   shift 2
 
   [[ -n "$value" ]] || return 0
+  if [[ "$value" == "$PUBLIC_DEFAULT_API_ENDPOINT" || "$value" == "$PUBLIC_DEFAULT_API_KEY" ]]; then
+    return 0
+  fi
 
   for path in "$@"; do
     [[ -e "$path" ]] || continue
@@ -31,10 +36,13 @@ check_secret_pattern_absent() {
 
   [[ -e "$path" ]] || return 0
 
-  if rg -a -q 'sk-[A-Za-z0-9_-]{20,}' "$path"; then
-    echo "A possible API key pattern was found in a release artifact." >&2
-    exit 1
-  fi
+  while IFS= read -r match; do
+    [[ -n "$match" ]] || continue
+    if [[ "$match" != "$PUBLIC_DEFAULT_API_KEY" ]]; then
+      echo "A possible API key pattern was found in a release artifact." >&2
+      exit 1
+    fi
+  done < <(rg -a -o --no-filename 'sk-[A-Za-z0-9_-]{20,}' "$path" 2>/dev/null || true)
 }
 
 api_endpoint="$(read_default ShotLens_LLM_APIEndpoint)"

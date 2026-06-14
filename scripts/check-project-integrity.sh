@@ -9,7 +9,10 @@ required_files=(
   "$ROOT_DIR/ShotLens/Tools/ShotLensSelect.swift"
   "$ROOT_DIR/ShotLens/Core/LLMTranslator.swift"
   "$ROOT_DIR/ShotLens/Core/LLMConnectionChecker.swift"
+  "$ROOT_DIR/ShotLens/Core/AppUpdater.swift"
   "$ROOT_DIR/Tests/TranslationEndpointSmoke.swift"
+  "$ROOT_DIR/Tests/AppUpdaterSmoke.swift"
+  "$ROOT_DIR/scripts/check-app-updater.sh"
 )
 
 for file in "${required_files[@]}"; do
@@ -33,8 +36,10 @@ rg -n '^import Vision$' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
 rg -n 'ShotLens/Tools/ShotLensOCR.swift' "$ROOT_DIR/scripts/build-local.sh" >/dev/null
 rg -n 'ShotLens/Tools/ShotLensSelect.swift' "$ROOT_DIR/scripts/build-local.sh" >/dev/null
 rg -n 'LLMConnectionChecker.swift' "$ROOT_DIR/ShotLens.xcodeproj/project.pbxproj" >/dev/null
+rg -n 'AppUpdater.swift' "$ROOT_DIR/ShotLens.xcodeproj/project.pbxproj" >/dev/null
 rg -n 'chatCompletionsURL' "$ROOT_DIR/ShotLens/Core/LLMTranslator.swift" >/dev/null
 rg -n 'LLMConnectionChecker' "$ROOT_DIR/ShotLens/App/MainWindow.swift" >/dev/null
+rg -n 'AppUpdater' "$ROOT_DIR/ShotLens/App/MainWindow.swift" >/dev/null
 
 while IFS= read -r script_name; do
   script_path="$ROOT_DIR/$script_name"

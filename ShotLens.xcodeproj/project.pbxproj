@@ -20,6 +20,7 @@
 		AA1000000000000000000006 /* TextLayoutOptimizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2000000000000000000006 /* TextLayoutOptimizer.swift */; };
 		AA1000000000000000000007 /* TranslationSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2000000000000000000007 /* TranslationSettings.swift */; };
 		AA100000000000000000000A /* LLMConnectionChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA200000000000000000000A /* LLMConnectionChecker.swift */; };
+		AA100000000000000000000B /* AppUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA200000000000000000000B /* AppUpdater.swift */; };
 		F279A23EB340264A391C9A83 /* TranslationResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F8018948F1F56D58139355C /* TranslationResult.swift */; };
 		2A87E29B1CCF1E2196F278C6 /* ShortcutRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3B498451C1DB5664DC17DC2 /* ShortcutRecorder.swift */; };
 		AA1000000000000000000008 /* ShotLens.icns in Resources */ = {isa = PBXBuildFile; fileRef = AA2000000000000000000008 /* ShotLens.icns */; };
@@ -42,6 +43,7 @@
 		AA2000000000000000000006 /* TextLayoutOptimizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextLayoutOptimizer.swift; sourceTree = "<group>"; };
 		AA2000000000000000000007 /* TranslationSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationSettings.swift; sourceTree = "<group>"; };
 		AA200000000000000000000A /* LLMConnectionChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMConnectionChecker.swift; sourceTree = "<group>"; };
+		AA200000000000000000000B /* AppUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdater.swift; sourceTree = "<group>"; };
 		3F8018948F1F56D58139355C /* TranslationResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationResult.swift; sourceTree = "<group>"; };
 		C3B498451C1DB5664DC17DC2 /* ShortcutRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutRecorder.swift; sourceTree = "<group>"; };
 		AA2000000000000000000008 /* ShotLens.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = ShotLens.icns; sourceTree = "<group>"; };
@@ -91,6 +93,7 @@
 				AA2000000000000000000006 /* TextLayoutOptimizer.swift */,
 				AA2000000000000000000007 /* TranslationSettings.swift */,
 				AA200000000000000000000A /* LLMConnectionChecker.swift */,
+				AA200000000000000000000B /* AppUpdater.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -210,6 +213,7 @@
 				AA1000000000000000000006 /* TextLayoutOptimizer.swift in Sources */,
 				AA1000000000000000000007 /* TranslationSettings.swift in Sources */,
 				AA100000000000000000000A /* LLMConnectionChecker.swift in Sources */,
+				AA100000000000000000000B /* AppUpdater.swift in Sources */,
 				F279A23EB340264A391C9A83 /* TranslationResult.swift in Sources */,
 				2A87E29B1CCF1E2196F278C6 /* ShortcutRecorder.swift in Sources */,
 			);

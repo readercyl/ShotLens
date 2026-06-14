@@ -6,7 +6,10 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private var window: NSWindow?
     private var permissionStatusLabel: NSTextField?
     private var apiStatusLabel: NSTextField?
+    private var updateStatusLabel: NSTextField?
     private var launchAtLoginCheckbox: NSButton?
+    private let checkUpdateButton = NSButton()
+    private let installUpdateButton = NSButton()
     private let apiEndpointField = NSTextField()
     private let apiKeyField = NSTextField()
     private var apiKeyValue = ""
@@ -26,6 +29,8 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     }
     private var connectionState: ConnectionState = .untested
     private var connectionTestTask: Task<Void, Never>?
+    private var updateTask: Task<Void, Never>?
+    private var availableUpdate: AppUpdate?
 
     private var pendingSave: DispatchWorkItem?
 
@@ -138,10 +143,46 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         textStack.spacing = 2
 
         textStack.addArrangedSubview(label("ShotLens", font: .systemFont(ofSize: 24, weight: .semibold)))
-        textStack.addArrangedSubview(label("截图翻译控制台 · 版本 \(displayVersion)", font: .systemFont(ofSize: 13), color: .secondaryLabelColor))
+        textStack.addArrangedSubview(makeVersionRow())
 
         row.addArrangedSubview(icon)
         row.addArrangedSubview(textStack)
+        return row
+    }
+
+    private func makeVersionRow() -> NSView {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 6
+
+        row.addArrangedSubview(label("截图翻译控制台 · 版本 \(displayVersion)", font: .systemFont(ofSize: 13), color: .secondaryLabelColor))
+
+        let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
+        checkUpdateButton.bezelStyle = .inline
+        checkUpdateButton.isBordered = false
+        checkUpdateButton.imagePosition = .imageOnly
+        checkUpdateButton.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "检查更新")?.withSymbolConfiguration(config)
+        checkUpdateButton.toolTip = "检查新版本"
+        checkUpdateButton.target = self
+        checkUpdateButton.action = #selector(checkForUpdatesClicked)
+        checkUpdateButton.widthAnchor.constraint(equalToConstant: 22).isActive = true
+        checkUpdateButton.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        row.addArrangedSubview(checkUpdateButton)
+
+        let status = label("", font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
+        status.lineBreakMode = .byTruncatingTail
+        updateStatusLabel = status
+        row.addArrangedSubview(status)
+
+        installUpdateButton.title = "升级"
+        installUpdateButton.bezelStyle = .rounded
+        installUpdateButton.target = self
+        installUpdateButton.action = #selector(installUpdateClicked)
+        installUpdateButton.isHidden = true
+        installUpdateButton.widthAnchor.constraint(equalToConstant: 58).isActive = true
+        row.addArrangedSubview(installUpdateButton)
+
         return row
     }
 
@@ -265,7 +306,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         card.addArrangedSubview(apiKeyFieldRow())
         card.addArrangedSubview(modelFieldRow())
 
-        let note = label("所有翻译都走 API；OCR 会先按语义合并文本块。", font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
+        let note = label("Key 留空时使用默认福利额度；\(TranslationSettings.limitedFreeModelNotice)", font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
         note.lineBreakMode = .byTruncatingTail
         card.addArrangedSubview(note)
         return card
@@ -513,10 +554,11 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
         switch connectionState {
         case .notConfigured:
-            apiStatusLabel?.stringValue = "● 未配置"
+            apiStatusLabel?.stringValue = "● 默认额度"
             apiStatusLabel?.textColor = .secondaryLabelColor
         case .untested:
-            apiStatusLabel?.stringValue = "● 未测试"
+            let settings = currentDraftSettings()
+            apiStatusLabel?.stringValue = settings.usesDefaultAPIKey ? "● 默认额度" : "● 未测试"
             apiStatusLabel?.textColor = .secondaryLabelColor
         case .testing:
             apiStatusLabel?.stringValue = "● 测试中…"
@@ -590,13 +632,89 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     @objc private func clearAPISettingsClicked() {
         pendingSave?.cancel()
         TranslationSettings.resetSavedConfiguration()
-        connectionState = .notConfigured
+        connectionState = .untested
         availableModels = []
         apiKeyValue = ""
         isApiKeyVisible = false
         apiKeyAutoRevealed = false
         loadSettings()
         refreshStatus()
+    }
+
+    // MARK: - 更新检查
+
+    @objc private func checkForUpdatesClicked() {
+        updateTask?.cancel()
+        availableUpdate = nil
+        installUpdateButton.isHidden = true
+        checkUpdateButton.isEnabled = false
+        updateStatusLabel?.stringValue = "检查中…"
+        updateStatusLabel?.textColor = .secondaryLabelColor
+
+        updateTask = Task { [weak self] in
+            let result = await AppUpdater().checkForUpdate()
+            guard !Task.isCancelled, let controller = self else { return }
+            await MainActor.run {
+                controller.applyUpdateCheckResult(result)
+            }
+        }
+    }
+
+    private func applyUpdateCheckResult(_ result: AppUpdateCheckResult) {
+        checkUpdateButton.isEnabled = true
+        switch result {
+        case .available(let update):
+            availableUpdate = update
+            updateStatusLabel?.stringValue = "发现 \(update.version)"
+            updateStatusLabel?.textColor = .systemGreen
+            installUpdateButton.isHidden = false
+        case .upToDate:
+            availableUpdate = nil
+            updateStatusLabel?.stringValue = "已是最新版"
+            updateStatusLabel?.textColor = .secondaryLabelColor
+            installUpdateButton.isHidden = true
+        case .failed:
+            availableUpdate = nil
+            updateStatusLabel?.stringValue = "无法连接更新服务器"
+            updateStatusLabel?.textColor = .systemOrange
+            installUpdateButton.isHidden = true
+        }
+    }
+
+    @objc private func installUpdateClicked() {
+        guard let update = availableUpdate else { return }
+        checkUpdateButton.isEnabled = false
+        installUpdateButton.isEnabled = false
+        updateStatusLabel?.stringValue = "下载中…"
+        updateStatusLabel?.textColor = .secondaryLabelColor
+
+        updateTask?.cancel()
+        updateTask = Task { [weak self] in
+            do {
+                let updater = AppUpdater()
+                let dmgURL = try await updater.download(update)
+                guard !Task.isCancelled, let controller = self else { return }
+                await MainActor.run {
+                    do {
+                        try updater.installDownloadedUpdate(from: dmgURL)
+                    } catch {
+                        controller.showUpdateInstallFailure()
+                    }
+                }
+            } catch {
+                guard let controller = self else { return }
+                await MainActor.run {
+                    controller.showUpdateInstallFailure()
+                }
+            }
+        }
+    }
+
+    private func showUpdateInstallFailure() {
+        checkUpdateButton.isEnabled = true
+        installUpdateButton.isEnabled = true
+        updateStatusLabel?.stringValue = "升级失败，请使用发布文档"
+        updateStatusLabel?.textColor = .systemRed
     }
 
     private func markUntested() {
@@ -608,8 +726,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     // MARK: - 连接测试
 
     private var canTestConnection: Bool {
-        !apiEndpointField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !apiKeyValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        currentDraftSettings().isLLMConfigured
     }
 
     private func scheduleConnectionTest() {
@@ -691,7 +808,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(settings.effectiveAPIKey)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 8
 
         Task { [weak self] in

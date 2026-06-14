@@ -28,6 +28,7 @@ struct TranslationEndpointSmoke {
             expectedPath: "/v1/chat/completions",
             assistantContent: "0: 你好\n1: 世界"
         )
+        try await assertEmptySavedSettingsUseDefaultAPI()
         try await assertConnectionCheckUsesChatCompletions()
 
         print("Translation endpoint smoke test passed.")
@@ -57,6 +58,51 @@ struct TranslationEndpointSmoke {
         }
     }
 
+    private static func assertEmptySavedSettingsUseDefaultAPI() async throws {
+        let defaults = UserDefaults.standard
+        let originalEndpoint = defaults.object(forKey: TranslationSettings.apiEndpointKey)
+        let originalKey = defaults.object(forKey: TranslationSettings.apiKeyKey)
+        let originalModel = defaults.object(forKey: TranslationSettings.modelKey)
+        defer {
+            restore(originalEndpoint, forKey: TranslationSettings.apiEndpointKey)
+            restore(originalKey, forKey: TranslationSettings.apiKeyKey)
+            restore(originalModel, forKey: TranslationSettings.modelKey)
+        }
+
+        defaults.removeObject(forKey: TranslationSettings.apiEndpointKey)
+        defaults.removeObject(forKey: TranslationSettings.apiKeyKey)
+        defaults.removeObject(forKey: TranslationSettings.modelKey)
+
+        let settings = TranslationSettings.load()
+        guard settings.apiEndpoint == TranslationSettings.defaultAPIEndpoint else {
+            throw TestFailure("Expected default endpoint to load when none is saved")
+        }
+        guard settings.apiKey.isEmpty, settings.usesDefaultAPIKey else {
+            throw TestFailure("Expected saved API key to stay hidden while using default fallback")
+        }
+        guard settings.model == TranslationSettings.defaultModel else {
+            throw TestFailure("Expected default model to load when none is saved")
+        }
+
+        MockOpenAIProtocol.reset()
+        let result = try await LLMTranslator(settings: settings)
+            .translate(["Hello", "World"], from: "en", to: "zh-Hans")
+        guard result == ["你好", "世界"] else {
+            throw TestFailure("Unexpected translations with default settings: \(result)")
+        }
+        guard MockOpenAIProtocol.requestedHosts == ["api.siliconflow.cn"],
+              MockOpenAIProtocol.requestedPaths == ["/v1/chat/completions"] else {
+            throw TestFailure("Expected default SiliconFlow chat completions request, got \(MockOpenAIProtocol.requestedHosts) \(MockOpenAIProtocol.requestedPaths)")
+        }
+        guard MockOpenAIProtocol.authorizationHeaders == ["Bearer \(TranslationSettings.defaultAPIKey)"] else {
+            throw TestFailure("Expected translator to use hidden default API key")
+        }
+        let firstBody = MockOpenAIProtocol.requestBodies.first ?? ""
+        guard firstBody.contains("Hunyuan-MT-7B") else {
+            throw TestFailure("Expected translator payload to include default model, got: \(firstBody)")
+        }
+    }
+
     private static func assertConnectionCheckUsesChatCompletions() async throws {
         MockOpenAIProtocol.reset()
         MockOpenAIProtocol.chatStatusCode = 200
@@ -77,14 +123,32 @@ struct TranslationEndpointSmoke {
             throw TestFailure("Expected connection check to use chat completions, got \(MockOpenAIProtocol.requestedPaths)")
         }
     }
+
+    private static func restore(_ value: Any?, forKey key: String) {
+        let defaults = UserDefaults.standard
+        if let value {
+            defaults.set(value, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
 }
 
 private final class MockOpenAIProtocol: URLProtocol {
     private static let lock = NSLock()
+    private static var hosts: [String] = []
     private static var paths: [String] = []
+    private static var authorizations: [String] = []
+    private static var bodies: [String] = []
     static var assistantContent = "0\t你好\n1\t世界"
     static var chatStatusCode = 200
     static var modelsStatusCode = 200
+
+    static var requestedHosts: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return hosts
+    }
 
     static var requestedPaths: [String] {
         lock.lock()
@@ -92,9 +156,24 @@ private final class MockOpenAIProtocol: URLProtocol {
         return paths
     }
 
+    static var authorizationHeaders: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return authorizations
+    }
+
+    static var requestBodies: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return bodies
+    }
+
     static func reset() {
         lock.lock()
+        hosts = []
         paths = []
+        authorizations = []
+        bodies = []
         assistantContent = "0\t你好\n1\t世界"
         chatStatusCode = 200
         modelsStatusCode = 200
@@ -102,7 +181,7 @@ private final class MockOpenAIProtocol: URLProtocol {
     }
 
     override class func canInit(with request: URLRequest) -> Bool {
-        request.url?.host == "shotlens-test.local"
+        request.url?.host == "shotlens-test.local" || request.url?.host == "api.siliconflow.cn"
     }
 
     override class func canonicalRequest(for request: URLRequest) -> URLRequest {
@@ -113,7 +192,10 @@ private final class MockOpenAIProtocol: URLProtocol {
         let path = request.url?.path ?? ""
         let content = Self.assistantContent
         Self.lock.lock()
+        Self.hosts.append(request.url?.host ?? "")
         Self.paths.append(path)
+        Self.authorizations.append(request.value(forHTTPHeaderField: "Authorization") ?? "")
+        Self.bodies.append(Self.bodyString(from: request))
         Self.lock.unlock()
 
         let statusCode: Int
@@ -148,6 +230,31 @@ private final class MockOpenAIProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+
+    private static func bodyString(from request: URLRequest) -> String {
+        if let httpBody = request.httpBody {
+            return String(data: httpBody, encoding: .utf8) ?? ""
+        }
+
+        guard let stream = request.httpBodyStream else { return "" }
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        let bufferSize = 1024
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+
+        while stream.hasBytesAvailable {
+            let read = stream.read(buffer, maxLength: bufferSize)
+            if read > 0 {
+                data.append(buffer, count: read)
+            } else {
+                break
+            }
+        }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
 }
 
 private struct TestFailure: Error, CustomStringConvertible {

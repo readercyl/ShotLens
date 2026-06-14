@@ -16,7 +16,7 @@ struct LLMTranslator: TranslationProvider {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(settings.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(settings.effectiveAPIKey)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 45
 
         var payload: [String: Any] = [
@@ -32,8 +32,8 @@ struct LLMTranslator: TranslationProvider {
                 ]
             ]
         ]
-        if !settings.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            payload["model"] = settings.model
+        if !settings.effectiveModel.isEmpty {
+            payload["model"] = settings.effectiveModel
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 

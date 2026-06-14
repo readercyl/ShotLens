@@ -5,14 +5,36 @@ struct TranslationSettings {
     static let apiEndpointKey = "ShotLens_LLM_APIEndpoint"
     static let apiKeyKey = "ShotLens_LLM_APIKey"
     static let modelKey = "ShotLens_LLM_Model"
+    static let defaultAPIEndpoint = "https://api.siliconflow.cn/v1"
+    static let defaultAPIKey = "sk-iiwyxcrwfaiqixpbfitsogijhfjsiolqtntqszuixgohjpnb"
+    static let defaultModel = "tencent/Hunyuan-MT-7B"
+    static let limitedFreeModelNotice = "混元模型当前限免，后续以服务商政策为准。"
 
     var apiEndpoint: String
     var apiKey: String
     var model: String
 
     var isLLMConfigured: Bool {
-        !apiEndpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !effectiveAPIEndpoint.isEmpty && !effectiveAPIKey.isEmpty
+    }
+
+    var usesDefaultAPIKey: Bool {
+        apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var effectiveAPIEndpoint: String {
+        let trimmed = apiEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? Self.defaultAPIEndpoint : trimmed
+    }
+
+    var effectiveAPIKey: String {
+        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? Self.defaultAPIKey : trimmed
+    }
+
+    var effectiveModel: String {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? Self.defaultModel : trimmed
     }
 
     var chatCompletionsURL: URL? {
@@ -42,7 +64,7 @@ struct TranslationSettings {
     }
 
     var apiAvailabilityText: String {
-        isLLMConfigured ? "API 已配置" : "API 未配置"
+        usesDefaultAPIKey ? "使用默认福利额度" : "使用自定义 API"
     }
 
     var translationAvailabilitySummary: String {
@@ -52,9 +74,9 @@ struct TranslationSettings {
     static func load() -> TranslationSettings {
         let defaults = UserDefaults.standard
         return TranslationSettings(
-            apiEndpoint: defaults.string(forKey: apiEndpointKey) ?? "",
+            apiEndpoint: defaultedValue(defaults.string(forKey: apiEndpointKey), fallback: defaultAPIEndpoint),
             apiKey: defaults.string(forKey: apiKeyKey) ?? "",
-            model: defaults.string(forKey: modelKey) ?? ""
+            model: defaultedValue(defaults.string(forKey: modelKey), fallback: defaultModel)
         )
     }
 
@@ -77,9 +99,14 @@ struct TranslationSettings {
     }
 
     private var normalizedEndpointString: String {
-        apiEndpoint
+        effectiveAPIEndpoint
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private static func defaultedValue(_ value: String?, fallback: String) -> String {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? fallback : trimmed
     }
 }
 
