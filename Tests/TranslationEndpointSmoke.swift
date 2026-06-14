@@ -43,7 +43,9 @@ struct TranslationEndpointSmoke {
         try await assertSingleItemFallbackRecoversWhenRepairFails()
         try await assertEmptySavedSettingsUseDefaultAPI()
         try await assertConnectionCheckUsesChatCompletions()
-        try await assertConnectionCheckRejectsInvalidTranslationFormat()
+        try await assertConnectionCheckAcceptsPlainTextMicroTranslation()
+        try await assertConnectionCheckAcceptsRepairRecovery()
+        try await assertConnectionCheckRejectsHTTPError()
 
         print("Translation endpoint smoke test passed.")
     }
@@ -119,6 +121,7 @@ struct TranslationEndpointSmoke {
 
     private static func assertConnectionCheckUsesChatCompletions() async throws {
         MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContent = "你好"
         MockOpenAIProtocol.chatStatusCode = 200
         MockOpenAIProtocol.modelsStatusCode = 404
 
@@ -136,11 +139,54 @@ struct TranslationEndpointSmoke {
         guard MockOpenAIProtocol.requestedPaths == ["/v1/chat/completions"] else {
             throw TestFailure("Expected connection check to use chat completions, got \(MockOpenAIProtocol.requestedPaths)")
         }
+        let body = MockOpenAIProtocol.requestBodies.first ?? ""
+        guard body.contains("Hello"), !body.contains("World") else {
+            throw TestFailure("Expected connection check to use a single micro-translation payload, got \(body)")
+        }
     }
 
-    private static func assertConnectionCheckRejectsInvalidTranslationFormat() async throws {
+    private static func assertConnectionCheckAcceptsPlainTextMicroTranslation() async throws {
         MockOpenAIProtocol.reset()
-        MockOpenAIProtocol.assistantContentQueue = ["Here is the answer: OK", "Still invalid"]
+        MockOpenAIProtocol.assistantContent = "你好"
+
+        let checker = LLMConnectionChecker(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+
+        let isAvailable = await checker.isAvailable()
+        guard isAvailable else {
+            throw TestFailure("Expected connection check to accept a single plain-text micro-translation")
+        }
+    }
+
+    private static func assertConnectionCheckAcceptsRepairRecovery() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContentQueue = [
+            "Here is the translation: 你好",
+            #"["你好"]"#
+        ]
+
+        let checker = LLMConnectionChecker(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+
+        let isAvailable = await checker.isAvailable()
+        guard isAvailable else {
+            throw TestFailure("Expected connection check to pass when repair recovers the micro-translation")
+        }
+        guard MockOpenAIProtocol.requestBodies.count == 2,
+              MockOpenAIProtocol.requestBodies[1].contains("Convert this model output") else {
+            throw TestFailure("Expected connection check to issue a repair request")
+        }
+    }
+
+    private static func assertConnectionCheckRejectsHTTPError() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.chatStatusCode = 401
 
         let checker = LLMConnectionChecker(settings: TranslationSettings(
             apiEndpoint: "https://shotlens-test.local/v1",
@@ -150,7 +196,7 @@ struct TranslationEndpointSmoke {
 
         let isAvailable = await checker.isAvailable()
         guard !isAvailable else {
-            throw TestFailure("Expected connection check to reject unparseable translation content")
+            throw TestFailure("Expected connection check to reject HTTP failures")
         }
     }
 

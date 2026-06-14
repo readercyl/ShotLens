@@ -14,14 +14,13 @@ if [[ ! "$APP_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 1
 fi
 
-if [[ -z "$CODESIGN_IDENTITY" ]]; then
-  echo "SHOTLENS_CODESIGN_IDENTITY is required for release packaging." >&2
-  echo "Use a stable Apple Developer ID Application certificate so macOS privacy permissions survive updates." >&2
-  exit 1
-fi
-
 rm -rf "$BUILD_DIR"
 mkdir -p "$STAGING_DIR"
+
+if [[ -z "$CODESIGN_IDENTITY" ]]; then
+  CODESIGN_IDENTITY="$("$ROOT_DIR/scripts/ensure-local-signing-cert.sh")"
+  echo "Using local release signing identity: $CODESIGN_IDENTITY" >&2
+fi
 
 SHOTLENS_APP_VERSION="$APP_VERSION" SHOTLENS_DEPLOY_DIR="$STAGING_DIR" SHOTLENS_CODESIGN_IDENTITY="$CODESIGN_IDENTITY" "$ROOT_DIR/scripts/build-local.sh" >/dev/null
 ln -s /Applications "$STAGING_DIR/Applications"

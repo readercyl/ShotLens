@@ -10,9 +10,10 @@ struct LLMConnectionChecker {
 
         do {
             try await LLMTranslator(settings: settings)
-                .validateTranslationFormat(from: "en", to: "zh-Hans")
+                .validateMicroTranslation(from: "en", to: "zh-Hans")
             return true
         } catch {
+            ShotLensLogger.log("API 测试失败", error: error)
             return false
         }
     }

@@ -672,6 +672,8 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     @objc private func testConnectionClicked() {
         connectionTestTask?.cancel()
+        syncAPIKeyDraftFromField()
+        flushPendingSave()
         // 先无条件显示"测试中…"，让用户感知按钮已被触发
         connectionState = .testing
         refreshStatus()
@@ -820,6 +822,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     }
 
     private func testConnection() {
+        syncAPIKeyDraftFromField()
         guard canTestConnection else {
             connectionState = .unavailable
             refreshStatus()
@@ -950,9 +953,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         if let field = obj.object as? NSTextField {
             if field === apiKeyField {
                 // 明文编辑时直接写入，密文时忽略（显示的是圆点不是真实值）
-                if isApiKeyVisible {
-                    apiKeyValue = apiKeyField.stringValue
-                }
+                syncAPIKeyDraftFromField()
             }
 
             if field === apiEndpointField || field === apiKeyField {
@@ -978,6 +979,11 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         pendingSave?.cancel()
         currentDraftSettings().save()
         refreshStatus()
+    }
+
+    private func syncAPIKeyDraftFromField() {
+        guard isApiKeyVisible else { return }
+        apiKeyValue = apiKeyField.stringValue
     }
 }
 

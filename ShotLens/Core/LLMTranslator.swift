@@ -13,12 +13,12 @@ struct LLMTranslator: TranslationProvider {
         )
     }
 
-    func validateTranslationFormat(from sourceLanguage: String, to targetLanguage: String) async throws {
+    func validateMicroTranslation(from sourceLanguage: String, to targetLanguage: String) async throws {
         _ = try await translate(
-            ["Hello", "World"],
+            ["Hello"],
             from: sourceLanguage,
             to: targetLanguage,
-            allowsSingleItemFallback: false
+            allowsSingleItemFallback: true
         )
     }
 

@@ -16,8 +16,14 @@ if rg -q 'Signature=adhoc' <<<"$signature_info"; then
   exit 1
 fi
 
-if ! rg -q '^TeamIdentifier=.+' <<<"$signature_info"; then
-  echo "Release app must have a stable TeamIdentifier from a Developer ID certificate." >&2
+requirement="$(codesign -dr - "$APP_PATH" 2>&1 || true)"
+if rg -q '^designated => cdhash ' <<<"$requirement"; then
+  echo "Release app designated requirement must not be cdhash-only; use a stable signing certificate." >&2
+  exit 1
+fi
+
+if ! rg -q 'identifier "com\.qingcheng\.shotlens"' <<<"$requirement"; then
+  echo "Release app designated requirement must include the stable ShotLens bundle identifier." >&2
   exit 1
 fi
 

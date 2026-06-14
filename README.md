@@ -70,12 +70,20 @@ bash scripts/build-local.sh
 打包 DMG：
 
 ```bash
-SHOTLENS_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" bash scripts/package-dmg.sh
+bash scripts/package-dmg.sh
 ```
 
 脚本会基于已有三段式 `v*` tag 自动计算下一个版本。例如当前最新 tag 为 `v1.1.0` 时，会输出 `build/release/ShotLens-v1.2.0.dmg`。如果要指定版本，可设置 `SHOTLENS_APP_VERSION=v1.2.0`。DMG 顶层只包含 `ShotLens.app` 和应用程序文件夹快捷方式。
 
-发布包必须使用稳定的 Apple Developer ID Application 证书签名。临时 ad-hoc 签名会让 macOS 在升级后把新版识别成不同应用，导致屏幕录制权限需要重新授权。本地开发构建仍可使用默认 ad-hoc 签名。
+默认打包会跳过 Apple Developer ID 认证和公证，但不会使用 ad-hoc 临时签名。脚本会自动创建或复用本机 `ShotLens Local Signing` 自签名代码签名证书，让 macOS 能在后续升级中识别为同一个 App，减少屏幕录制权限反复丢失。
+
+从旧 ad-hoc 版本第一次升级到本机稳定签名版本时，macOS 可能仍需要重新授权一次屏幕录制权限；完成这次授权后，只要后续版本继续使用同一个本机签名证书，权限不应每次升级都丢失。
+
+如果后续要改用 Developer ID 证书，也可以显式指定签名身份：
+
+```bash
+SHOTLENS_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" bash scripts/package-dmg.sh
+```
 
 ## 验证
 
@@ -97,7 +105,7 @@ bash scripts/check-dmg-layout.sh
 - `check-project-integrity.sh`：检查关键项目文件、OCR 辅助进程、框选辅助进程和 Xcode 引用是否完整。
 - `build-local.sh`：执行本地构建。
 - `check-no-private-config.sh`：检查构建产物里没有泄露本机 API 配置。
-- `check-release-signature.sh`：检查发布版不是 ad-hoc 签名，并带有稳定 TeamIdentifier。
+- `check-release-signature.sh`：检查发布版不是 ad-hoc 签名，并带有稳定 bundle identifier 的签名要求。
 - `check-dmg-layout.sh`：检查 DMG 目录布局。
 
 ## 创建发行版
@@ -105,7 +113,7 @@ bash scripts/check-dmg-layout.sh
 命令行方式：
 
 ```bash
-SHOTLENS_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" bash scripts/release-github.sh
+bash scripts/release-github.sh
 ```
 
 发布版本号必须使用三段式，例如 `v0.7.0`。

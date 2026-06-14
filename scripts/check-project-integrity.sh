@@ -14,6 +14,7 @@ required_files=(
   "$ROOT_DIR/Tests/AppUpdaterSmoke.swift"
   "$ROOT_DIR/scripts/check-app-updater.sh"
   "$ROOT_DIR/scripts/check-compact-ui.sh"
+  "$ROOT_DIR/scripts/ensure-local-signing-cert.sh"
   "$ROOT_DIR/scripts/check-release-signature.sh"
 )
 
