@@ -62,6 +62,7 @@ struct TranslationEndpointSmoke {
         try await assertSingleBlockExplanationParses()
         try await assertRepairRequestFixesInvalidBatchResponse()
         try await assertSingleItemFallbackRecoversWhenRepairFails()
+        try await assertSingleItemFallbackUsesBestEffortWithoutRepair()
         try await assertEmptySavedSettingsUseDefaultAPI()
         try await assertClearSavedSettingsDisableDefaultAPI()
         try await assertConnectionCheckUsesChatCompletions()
@@ -345,6 +346,30 @@ struct TranslationEndpointSmoke {
         }
     }
 
+    private static func assertSingleItemFallbackUsesBestEffortWithoutRepair() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContentQueue = [
+            "Translations: hello and world",
+            "Still not JSON",
+            "Here is the translation: 你好",
+            "Here is the translation: 世界"
+        ]
+
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+
+        let result = try await translator.translate(["Hello", "World"], from: "en", to: "zh-Hans")
+        guard result == ["你好", "世界"] else {
+            throw TestFailure("Expected best-effort single item fallback to recover translations, got \(result)")
+        }
+        guard MockOpenAIProtocol.requestBodies.count == 4 else {
+            throw TestFailure("Expected batch, repair, and two best-effort single-item requests, got \(MockOpenAIProtocol.requestBodies.count)")
+        }
+    }
+
     private static func restore(_ value: Any?, forKey key: String) {
         let defaults = UserDefaults.standard
         if let value {
@@ -365,6 +390,7 @@ private final class MockOpenAIProtocol: URLProtocol {
     static var assistantContentQueue: [String] = []
     static var chatStatusCode = 200
     static var modelsStatusCode = 200
+    static var statusCodeQueue: [Int] = []
 
     static var requestedHosts: [String] {
         lock.lock()
@@ -400,6 +426,7 @@ private final class MockOpenAIProtocol: URLProtocol {
         assistantContentQueue = []
         chatStatusCode = 200
         modelsStatusCode = 200
+        statusCodeQueue = []
         lock.unlock()
     }
 
@@ -427,7 +454,9 @@ private final class MockOpenAIProtocol: URLProtocol {
         Self.lock.unlock()
 
         let statusCode: Int
-        if path == "/v1/chat/completions" {
+        if !Self.statusCodeQueue.isEmpty {
+            statusCode = Self.statusCodeQueue.removeFirst()
+        } else if path == "/v1/chat/completions" {
             statusCode = Self.chatStatusCode
         } else if path == "/v1/models" {
             statusCode = Self.modelsStatusCode

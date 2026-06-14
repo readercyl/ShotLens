@@ -1,6 +1,5 @@
 import AppKit
 import CoreGraphics
-import QuartzCore
 import ServiceManagement
 
 final class MainWindowController: NSObject, NSTextFieldDelegate {
@@ -12,7 +11,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private var apiDefaultNoteLabel: NSTextField?
     private var launchAtLoginCheckbox: NSButton?
     private let checkUpdateButton = NSButton()
-    private let checkUpdateIconView = NSImageView()
     private let installUpdateButton = NSButton()
     private let toggleAPIButton = NSButton()
     private var apiDetailsContainer: NSStackView?
@@ -169,27 +167,15 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
         row.addArrangedSubview(label("版本 \(displayVersion)", font: .systemFont(ofSize: 13), color: .secondaryLabelColor))
 
-        let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
+        checkUpdateButton.title = "测试新版"
         checkUpdateButton.bezelStyle = .inline
-        checkUpdateButton.isBordered = false
-        checkUpdateButton.wantsLayer = true
+        checkUpdateButton.isBordered = true
         checkUpdateButton.toolTip = "检查新版本"
         checkUpdateButton.target = self
         checkUpdateButton.action = #selector(checkForUpdatesClicked)
         checkUpdateButton.translatesAutoresizingMaskIntoConstraints = false
-        checkUpdateButton.widthAnchor.constraint(equalToConstant: 22).isActive = true
+        checkUpdateButton.widthAnchor.constraint(equalToConstant: 72).isActive = true
         checkUpdateButton.heightAnchor.constraint(equalToConstant: 22).isActive = true
-        checkUpdateIconView.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "检查更新")?.withSymbolConfiguration(config)
-        checkUpdateIconView.imageScaling = .scaleProportionallyDown
-        checkUpdateIconView.wantsLayer = true
-        checkUpdateIconView.translatesAutoresizingMaskIntoConstraints = false
-        checkUpdateButton.addSubview(checkUpdateIconView)
-        NSLayoutConstraint.activate([
-            checkUpdateIconView.centerXAnchor.constraint(equalTo: checkUpdateButton.centerXAnchor),
-            checkUpdateIconView.centerYAnchor.constraint(equalTo: checkUpdateButton.centerYAnchor),
-            checkUpdateIconView.widthAnchor.constraint(equalToConstant: 16),
-            checkUpdateIconView.heightAnchor.constraint(equalToConstant: 16),
-        ])
         row.addArrangedSubview(checkUpdateButton)
 
         let status = label("", font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
@@ -355,7 +341,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         details.addArrangedSubview(modelFieldRow())
         details.addArrangedSubview(actionRow)
 
-        let note = label("Key 留空时使用默认福利额度；\(TranslationSettings.limitedFreeModelNotice)", font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
+        let note = label("Key 留空时使用默认限免；\(TranslationSettings.limitedFreeModelNotice)", font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
         note.lineBreakMode = .byTruncatingTail
         apiDefaultNoteLabel = note
         details.addArrangedSubview(note)
@@ -630,7 +616,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             if !settings.isLLMConfigured {
                 apiStatusLabel?.stringValue = "● 未配置"
             } else {
-                apiStatusLabel?.stringValue = settings.usesDefaultAPIKey ? "● 默认福利额度" : "● 自定义 API"
+                apiStatusLabel?.stringValue = settings.usesDefaultAPIKey ? "● 默认限免" : "● 自定义 API"
             }
             apiStatusLabel?.textColor = .secondaryLabelColor
         case .testing:
@@ -640,7 +626,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             apiStatusLabel?.stringValue = "● 可用"
             apiStatusLabel?.textColor = .systemGreen
         case .transientFailure:
-            apiStatusLabel?.stringValue = currentDraftSettings().usesDefaultAPIKey ? "● 默认额度繁忙" : "● 暂时不可用"
+            apiStatusLabel?.stringValue = currentDraftSettings().usesDefaultAPIKey ? "● 默认限免繁忙" : "● 暂时不可用"
             apiStatusLabel?.textColor = .systemOrange
         case .unavailable:
             apiStatusLabel?.stringValue = "● 不可用"
@@ -744,7 +730,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         availableUpdate = nil
         installUpdateButton.isHidden = true
         checkUpdateButton.isEnabled = false
-        startUpdateButtonRotation()
+        checkUpdateButton.title = "测试中…"
         updateStatusLabel?.stringValue = "检查中…"
         updateStatusLabel?.textColor = .secondaryLabelColor
 
@@ -759,7 +745,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     private func applyUpdateCheckResult(_ result: AppUpdateCheckResult) {
         checkUpdateButton.isEnabled = true
-        stopUpdateButtonRotation()
+        checkUpdateButton.title = "测试新版"
         switch result {
         case .available(let update):
             availableUpdate = update
@@ -812,23 +798,9 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private func showUpdateInstallFailure() {
         checkUpdateButton.isEnabled = true
         installUpdateButton.isEnabled = true
+        checkUpdateButton.title = "测试新版"
         updateStatusLabel?.stringValue = "升级失败，请使用发布文档"
         updateStatusLabel?.textColor = .systemRed
-    }
-
-    private func startUpdateButtonRotation() {
-        checkUpdateIconView.layer?.removeAnimation(forKey: "shotlens.update.spin")
-        let animation = CABasicAnimation(keyPath: "transform.rotation.z")
-        animation.fromValue = 0
-        animation.toValue = CGFloat.pi * 2
-        animation.duration = 0.8
-        animation.repeatCount = .infinity
-        checkUpdateIconView.layer?.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-        checkUpdateIconView.layer?.add(animation, forKey: "shotlens.update.spin")
-    }
-
-    private func stopUpdateButtonRotation() {
-        checkUpdateIconView.layer?.removeAnimation(forKey: "shotlens.update.spin")
     }
 
     private func markUntested() {

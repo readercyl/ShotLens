@@ -5,6 +5,7 @@ import Carbon
 @main
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let lastShownReleaseNotesVersionKey = "ShotLens_LastShownReleaseNotesVersion"
     private static var retainedDelegate: AppDelegate?
 
     private var statusItem: NSStatusItem?
@@ -55,6 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         openMainWindow()
+        showReleaseNotesIfNeeded()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -470,28 +472,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func userFacingTranslationFailureMessage(for error: Error) -> String {
-        if let translationError = error as? TranslationError {
-            switch translationError {
-            case .invalidLLMResponse, .llmResponseCountMismatch:
-                return "翻译结果不稳定，已自动重试但仍失败，请再试一次。"
-            case .llmHTTPError(let statusCode, _):
-                if statusCode == 401 || statusCode == 403 {
-                    return "API Key 无法使用，请检查 API 设置。"
-                }
-                if statusCode == 429 || statusCode >= 500 {
-                    return "API 暂时繁忙，请稍后重试。"
-                }
-                return "API 请求失败，请检查 API 设置。"
-            case .invalidLLMEndpoint:
-                return "API 地址无效，请检查 API 设置。"
-            case .llmNotConfigured:
-                return "未配置 API，请在控制台设置或恢复默认。"
-            case .missingSourceLanguage:
-                return "未识别到可翻译文字。"
-            }
+        "翻译失败"
+    }
+
+    private func showReleaseNotesIfNeeded() {
+        guard let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+              !version.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
         }
-        let message = error.localizedDescription
-        return message.isEmpty ? "翻译失败，请再试一次。" : message
+        let defaults = UserDefaults.standard
+        guard defaults.string(forKey: Self.lastShownReleaseNotesVersionKey) != version else {
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            let alert = NSAlert()
+            alert.messageText = "ShotLens v\(version) 更新完成"
+            alert.informativeText = Self.releaseNotesText(for: version)
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "关闭")
+            alert.runModal()
+            defaults.set(version, forKey: Self.lastShownReleaseNotesVersionKey)
+        }
+    }
+
+    private static func releaseNotesText(for version: String) -> String {
+        switch version {
+        case "0.8.3":
+            return [
+                "• 新版本检测改为文字按钮，界面更稳定。",
+                "• 翻译失败提示精简为“翻译失败”。",
+                "• 加强翻译兜底，减少格式异常导致的失败。",
+                "• 默认 API 状态改为“默认限免”。"
+            ].joined(separator: "\n")
+        default:
+            return "• 修复已知问题并提升稳定性。"
+        }
     }
 
     // MARK: - UI 桥接

@@ -60,14 +60,27 @@ struct LLMTranslator: TranslationProvider {
             return try parseTranslations(from: content, expectedCount: texts.count)
         } catch {
             ShotLensLogger.log("批量翻译返回格式异常，尝试修复：\(content.logSnippet)")
-            let repairedContent = try await requestAssistantContent(
-                systemPrompt: repairSystemPrompt(expectedCount: texts.count),
-                userPayload: makeRepairPayload(
-                    content: content,
-                    expectedCount: texts.count,
-                    targetLanguage: targetLanguage
+            let repairedContent: String
+            do {
+                repairedContent = try await requestAssistantContent(
+                    systemPrompt: repairSystemPrompt(expectedCount: texts.count),
+                    userPayload: makeRepairPayload(
+                        content: content,
+                        expectedCount: texts.count,
+                        targetLanguage: targetLanguage
+                    )
                 )
-            )
+            } catch {
+                guard allowsSingleItemFallback else {
+                    throw error
+                }
+                ShotLensLogger.log("翻译格式修复请求失败，进入逐条兜底", error: error)
+                return try await translateItemsIndividually(
+                    texts,
+                    from: sourceLanguage,
+                    to: targetLanguage
+                )
+            }
 
             do {
                 return try parseTranslations(from: repairedContent, expectedCount: texts.count)
@@ -162,14 +175,23 @@ struct LLMTranslator: TranslationProvider {
             do {
                 translated.append(try parseTranslations(from: content, expectedCount: 1)[0])
             } catch {
-                let repairedContent = try await requestAssistantContent(
-                    systemPrompt: repairSystemPrompt(expectedCount: 1),
-                    userPayload: makeRepairPayload(
-                        content: content,
-                        expectedCount: 1,
-                        targetLanguage: targetLanguage
+                let repairedContent: String
+                do {
+                    repairedContent = try await requestAssistantContent(
+                        systemPrompt: repairSystemPrompt(expectedCount: 1),
+                        userPayload: makeRepairPayload(
+                            content: content,
+                            expectedCount: 1,
+                            targetLanguage: targetLanguage
+                        )
                     )
-                )
+                } catch {
+                    if let bestEffort = bestEffortSingleTranslation(from: content) {
+                        translated.append(bestEffort)
+                        continue
+                    }
+                    throw error
+                }
                 do {
                     translated.append(try parseTranslations(from: repairedContent, expectedCount: 1)[0])
                 } catch {
@@ -389,10 +411,8 @@ struct LLMTranslator: TranslationProvider {
             .components(separatedBy: .newlines)
             .map { $0.strippingBulletPrefix.cleanedTranslationText }
             .filter { !$0.isEmpty && !looksLikeExplanation($0) }
-        if lines.count == 1 {
-            return lines[0]
-        }
-        return nil
+        guard !lines.isEmpty else { return nil }
+        return lines.joined(separator: "\n")
     }
 
     private func firstNonEmptyString(in dictionary: [String: Any], keys: [String]) -> String? {

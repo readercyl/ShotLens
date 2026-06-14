@@ -67,7 +67,7 @@ struct TranslationSettings {
 
     var apiAvailabilityText: String {
         guard isLLMConfigured else { return "未配置" }
-        return usesDefaultAPIKey ? "使用默认福利额度" : "使用自定义 API"
+        return usesDefaultAPIKey ? "使用默认限免" : "使用自定义 API"
     }
 
     var translationAvailabilitySummary: String {

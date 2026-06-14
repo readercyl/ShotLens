@@ -9,7 +9,7 @@ ShotLens 是一个轻量级 macOS 菜单栏截图翻译工具。
 - 菜单栏常驻工具，支持全局快捷键触发
 - 冻结屏幕后框选翻译区域
 - 基于 Apple Vision 的独立 OCR 辅助进程
-- 兼容 OpenAI 的 API 翻译，内置默认福利额度
+- 兼容 OpenAI 的 API 翻译，内置默认限免额度
 - 支持填写 `/v1`、`/v1/chat/completions`、`/v1/models` 等常见 API 地址形式
 - API 测试按钮会检查真实聊天补全端点，减少 `/models` 不可用和模型格式漂移造成的误报
 - 模型字段可选：填写时显式传入，留空时由 API 服务商使用默认行为
@@ -29,7 +29,7 @@ ShotLens 是一个轻量级 macOS 菜单栏截图翻译工具。
 ## 使用说明
 
 1. 启动 ShotLens 后，在菜单栏打开控制台。
-2. 默认 API 地址和模型已预置，Key 留空时使用默认福利额度。
+2. 默认 API 地址和模型已预置，Key 留空时使用默认限免。
 3. API 信息默认收起；如需使用自己的额度，可展开“API 信息”填写 API 密钥，也可以改 API 地址和模型。
 4. 点击“测试”确认当前配置可用。
 5. 授予屏幕录制权限。
@@ -38,7 +38,7 @@ ShotLens 是一个轻量级 macOS 菜单栏截图翻译工具。
 
 ## API 配置
 
-ShotLens 使用兼容 OpenAI 的聊天补全接口。默认使用 SiliconFlow 地址 `https://api.siliconflow.cn/v1` 和模型 `tencent/Hunyuan-MT-7B`。Key 输入框留空时，应用会使用内置公共福利 Key；这个 Key 可能限额、失效或被随时撤销，重度用户建议填写自己的 API Key。
+ShotLens 使用兼容 OpenAI 的聊天补全接口。默认使用 SiliconFlow 地址 `https://api.siliconflow.cn/v1` 和模型 `tencent/Hunyuan-MT-7B`。Key 输入框留空时，应用会使用内置公共限免 Key；这个 Key 可能限额、失效或被随时撤销，重度用户建议填写自己的 API Key。
 
 `tencent/Hunyuan-MT-7B` 当前为限免模型，后续可用性和计费以 SiliconFlow/模型服务商政策为准。
 
@@ -53,7 +53,7 @@ https://example.com/v1/models
 
 连接测试会发送一个极小的聊天补全请求，用来验证地址、密钥和服务可用性。部分服务商不开放 `/models`，或模型偶尔没有按翻译格式返回，都不会再误判为 API 不可用。
 
-控制台里的“清空”和“恢复默认”含义不同：“清空”会完全清除地址、Key 和模型，不再使用默认福利额度；“恢复默认”会回到内置 SiliconFlow 地址、混元模型和默认福利 Key。
+控制台里的“清空”和“恢复默认”含义不同：“清空”会完全清除地址、Key 和模型，不再使用默认限免；“恢复默认”会回到内置 SiliconFlow 地址、混元模型和默认限免 Key。
 
 翻译时会优先要求模型返回 JSON 数组；如果模型偶发返回编号列表、对象、代码块、解释前缀或数量不稳定，ShotLens 会自动修复格式并逐条兜底翻译，尽量避免整张截图失败。
 
