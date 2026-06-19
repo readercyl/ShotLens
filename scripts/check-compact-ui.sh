@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 MAIN_WINDOW="$ROOT_DIR/ShotLens/App/MainWindow.swift"
 OVERLAY_WINDOW="$ROOT_DIR/ShotLens/Core/OverlayWindow.swift"
+SELECT_WINDOW="$ROOT_DIR/ShotLens/Tools/ShotLensSelect.swift"
 
 rg -n 'apiDetailsExpandedKey' "$MAIN_WINDOW" >/dev/null
 rg -n 'apiDetailsContainer' "$MAIN_WINDOW" >/dev/null
@@ -32,6 +33,14 @@ if rg -n 'minimumWidth|minimumHeight|singleLineWidth|containedRenderRect\(.*mini
   echo "Translation overlay should render inside the original OCR rect without expanding into nearby text." >&2
   exit 1
 fi
+if rg -n 'NSApp\.activate\(ignoringOtherApps: true\)' "$OVERLAY_WINDOW" >/dev/null; then
+  echo "Result overlay must not activate the main app because activation can switch away from fullscreen Spaces." >&2
+  exit 1
+fi
+rg -n 'NSPanel' "$OVERLAY_WINDOW" "$SELECT_WINDOW" >/dev/null
+rg -n 'nonactivatingPanel' "$OVERLAY_WINDOW" "$SELECT_WINDOW" >/dev/null
+rg -n 'screenSaver' "$OVERLAY_WINDOW" "$SELECT_WINDOW" >/dev/null
+rg -n '\.stationary' "$OVERLAY_WINDOW" "$SELECT_WINDOW" >/dev/null
 rg -n 'containedRenderRect\(for: baseRect\)' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'var best = minimumSize' "$OVERLAY_WINDOW" >/dev/null
 

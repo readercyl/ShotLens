@@ -25,15 +25,15 @@ final class ShotLensSelect: NSObject, NSApplicationDelegate {
         for screen in screens {
             let window = SelectionWindow(
                 contentRect: screen.frame,
-                styleMask: [.borderless],
+                styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered,
                 defer: false
             )
-            window.level = .floating
+            window.level = .screenSaver
             window.isOpaque = false
             window.backgroundColor = .clear
             window.hasShadow = false
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
             window.onCancel = {
                 Self.write(cancelled: true)
             }
@@ -45,11 +45,9 @@ final class ShotLensSelect: NSObject, NSApplicationDelegate {
                 Self.write(rect: rect)
             }
             window.contentView = view
-            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
             windows.append(window)
         }
-
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     private static func write(rect: CGRect) -> Never {
@@ -136,7 +134,7 @@ private struct FrozenSelectionSnapshot {
     }
 }
 
-private final class SelectionWindow: NSWindow {
+private final class SelectionWindow: NSPanel {
     var onCancel: (() -> Never)?
 
     override var canBecomeKey: Bool { true }

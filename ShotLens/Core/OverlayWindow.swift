@@ -6,6 +6,16 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     var onDismiss: (() -> Void)?
     var onRetry: (() -> Void)?
 
+    fileprivate static let backdropLevel = NSWindow.Level.screenSaver
+    fileprivate static let resultLevel = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
+    fileprivate static let controlLevel = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 2)
+    fileprivate static let fullscreenOverlayBehavior: NSWindow.CollectionBehavior = [
+        .canJoinAllSpaces,
+        .fullScreenAuxiliary,
+        .stationary,
+        .ignoresCycle
+    ]
+
     private var resultWindow: OverlayResultWindow?
     private var statusWindow: OverlayStatusWindow?
     private var saveWindow: OverlaySaveWindow?
@@ -32,18 +42,18 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
 
         let window = OverlayResultWindow(
             contentRect: windowRect,
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        window.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 2)
+        window.level = Self.resultLevel
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = true
         window.isMovableByWindowBackground = true
         window.animationBehavior = .none
         window.isReleasedWhenClosed = false
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        window.collectionBehavior = Self.fullscreenOverlayBehavior
         window.delegate = self
         window.onCancel = { [weak self] in
             self?.dismiss()
@@ -62,9 +72,8 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         self.contentView = contentView
 
         backdropWindows.forEach { $0.orderFrontRegardless() }
-        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
         statusWindow.orderFrontRegardless()
-        NSApp.activate(ignoringOtherApps: true)
     }
 
     @MainActor
@@ -104,18 +113,18 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         NSScreen.screens.map { screen in
             let window = OverlayBackdropWindow(
                 contentRect: screen.frame,
-                styleMask: [.borderless],
+                styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered,
                 defer: false
             )
-            window.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
+            window.level = Self.backdropLevel
             window.isOpaque = false
             window.backgroundColor = .clear
             window.ignoresMouseEvents = true
             window.hasShadow = false
             window.animationBehavior = .none
             window.isReleasedWhenClosed = false
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+            window.collectionBehavior = Self.fullscreenOverlayBehavior
             window.onCancel = { [weak self] in
                 self?.dismiss()
             }
@@ -255,7 +264,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     }
 }
 
-private final class OverlayStatusWindow: NSWindow {
+private final class OverlayStatusWindow: NSPanel {
     private var anchorRect: CGRect
     private let statusView: StatusContentView
 
@@ -264,18 +273,18 @@ private final class OverlayStatusWindow: NSWindow {
         self.statusView = StatusContentView(frame: CGRect(x: 0, y: 0, width: 76, height: 28))
         super.init(
             contentRect: CGRect(origin: anchorRect.origin, size: statusView.bounds.size),
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 3)
+        level = OverlayWindow.controlLevel
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
         animationBehavior = .none
         isReleasedWhenClosed = false
         ignoresMouseEvents = true
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        collectionBehavior = OverlayWindow.fullscreenOverlayBehavior
         contentView = statusView
     }
 
@@ -295,7 +304,7 @@ private final class OverlayStatusWindow: NSWindow {
         let size = statusView.preferredSize
         statusView.frame = CGRect(origin: .zero, size: size)
         setFrame(statusFrame(size: size), display: true)
-        makeKeyAndOrderFront(nil)
+        orderFrontRegardless()
     }
 
     func setToggle(
@@ -335,7 +344,7 @@ private final class OverlayStatusWindow: NSWindow {
     }
 }
 
-private final class OverlaySaveWindow: NSWindow {
+private final class OverlaySaveWindow: NSPanel {
     var onSave: (() -> Void)? {
         didSet { saveView.onSave = onSave }
     }
@@ -345,18 +354,18 @@ private final class OverlaySaveWindow: NSWindow {
     init(statusFrame: CGRect) {
         super.init(
             contentRect: Self.frame(for: statusFrame),
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 3)
+        level = OverlayWindow.controlLevel
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
         animationBehavior = .none
         isReleasedWhenClosed = false
         ignoresMouseEvents = false
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+        collectionBehavior = OverlayWindow.fullscreenOverlayBehavior
         contentView = saveView
     }
 
@@ -545,7 +554,7 @@ private extension StatusRetryButton {
     }
 }
 
-private final class OverlayResultWindow: NSWindow {
+private final class OverlayResultWindow: NSPanel {
     var onCancel: (() -> Void)?
 
     override var canBecomeKey: Bool { true }
@@ -560,7 +569,7 @@ private final class OverlayResultWindow: NSWindow {
     }
 }
 
-private final class OverlayBackdropWindow: NSWindow {
+private final class OverlayBackdropWindow: NSPanel {
     var onCancel: (() -> Void)?
 
     override var canBecomeKey: Bool { true }
