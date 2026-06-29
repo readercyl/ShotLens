@@ -31,7 +31,7 @@ if rg -q '^designated => cdhash ' <<<"$requirement"; then
   exit 1
 fi
 
-if ! rg -q 'identifier "com\.qingcheng\.shotlens"' <<<"$requirement"; then
+if ! rg -q 'identifier "com\.qingcheng\.shotlens\.mac"' <<<"$requirement"; then
   echo "Release app designated requirement must include the stable ShotLens bundle identifier." >&2
   exit 1
 fi

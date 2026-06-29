@@ -6,6 +6,8 @@ import Carbon
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private static var retainedDelegate: AppDelegate?
+    private static let legacyDefaultsSuiteName = "com.qingcheng.shotlens"
+    private static let legacyDefaultsMigrationKey = "ShotLens_DidMigrateLegacyDefaults"
 
     private var statusItem: NSStatusItem?
     private var hotKeyRef: EventHotKeyRef?
@@ -20,11 +22,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static var shared: AppDelegate?
 
     static func main() {
+        migrateLegacyDefaultsIfNeeded()
         let app = NSApplication.shared
         let delegate = AppDelegate()
         retainedDelegate = delegate
         app.delegate = delegate
         app.run()
+    }
+
+    private static func migrateLegacyDefaultsIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: legacyDefaultsMigrationKey),
+              let legacyDefaults = UserDefaults(suiteName: legacyDefaultsSuiteName) else { return }
+
+        for (key, value) in legacyDefaults.dictionaryRepresentation()
+            where key.hasPrefix("ShotLens_") && defaults.object(forKey: key) == nil {
+            defaults.set(value, forKey: key)
+        }
+        defaults.set(true, forKey: legacyDefaultsMigrationKey)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

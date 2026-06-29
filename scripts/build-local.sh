@@ -57,7 +57,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
     <key>CFBundleIconFile</key>
     <string>ShotLens.icns</string>
     <key>CFBundleIdentifier</key>
-    <string>com.qingcheng.shotlens</string>
+    <string>com.qingcheng.shotlens.mac</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
