@@ -21,16 +21,6 @@ struct ScreenshotCapture {
         CGPreflightScreenCaptureAccess()
     }
 
-    func displayFrames() -> [CGRect] {
-        NSScreen.screens.map { $0.frame }
-    }
-
-    func scale(for selectionRect: CGRect) -> CGFloat {
-        screen(containing: selectionRect)?.backingScaleFactor
-            ?? NSScreen.main?.backingScaleFactor
-            ?? 1.0
-    }
-
     func capture(selection rect: CGRect) async throws -> CapturedScreenshot? {
         guard let frozenSnapshot = try await captureFrozenDisplay() else {
             return nil
@@ -38,19 +28,19 @@ struct ScreenshotCapture {
         return try crop(frozenSnapshot: frozenSnapshot, selection: rect)
     }
 
-    func captureFrozenDisplay() async throws -> FrozenScreenshot? {
-        guard let screenRect = displayFrames().unionRect() else {
+    func captureFrozenDisplay(containing mouseLocation: CGPoint = NSEvent.mouseLocation) async throws -> FrozenScreenshot? {
+        guard let screen = screen(containing: mouseLocation) else {
             return nil
         }
-        let image = try await captureVisibleDisplayImage(screenRect: screenRect)
+        let image = try await captureDisplayImage(for: screen)
         let outputURL = temporaryPNGURL()
         try writePNG(image, to: outputURL)
-        ShotLensLogger.log("冻结屏幕：ScreenCaptureKit 进程内截图，输出 \(outputURL.path)")
+        ShotLensLogger.log("冻结屏幕：捕获鼠标所在显示器 \(screen.frame)，输出 \(outputURL.path)")
 
         return FrozenScreenshot(
             image: image,
             fileURL: outputURL,
-            screenRect: screenRect
+            screenRect: screen.frame
         )
     }
 
@@ -94,100 +84,33 @@ struct ScreenshotCapture {
             .appendingPathExtension("png")
     }
 
-    private func captureVisibleDisplayImage(screenRect: CGRect) async throws -> CGImage {
-        if #available(macOS 15.2, *) {
-            return try await captureScreenRectImage(screenRect)
-        }
-
-        return try await captureDisplayComposite(screenRect: screenRect)
-    }
-
-    @available(macOS 15.2, *)
-    private func captureScreenRectImage(_ screenRect: CGRect) async throws -> CGImage {
-        try await withCheckedThrowingContinuation { continuation in
-            SCScreenshotManager.captureImage(in: screenRect) { image, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-
-                guard let image else {
-                    continuation.resume(throwing: ScreenshotCaptureError.emptyImage)
-                    return
-                }
-
-                continuation.resume(returning: normalizedCopy(of: image) ?? image)
-            }
-        }
-    }
-
-    private func captureDisplayComposite(screenRect: CGRect) async throws -> CGImage {
-        let screens = NSScreen.screens
-        guard !screens.isEmpty else {
+    private func captureDisplayImage(for screen: NSScreen) async throws -> CGImage {
+        guard let displayID = displayID(for: screen) else {
             throw ScreenshotCaptureError.emptyImage
         }
+
         let content = try await SCShareableContent.current
-        let screensByDisplayID = Dictionary(
-            uniqueKeysWithValues: screens.compactMap { screen -> (CGDirectDisplayID, NSScreen)? in
-                guard let displayID = displayID(for: screen) else { return nil }
-                return (displayID, screen)
-            }
-        )
-
-        let scale = max(screens.map(\.backingScaleFactor).max() ?? 1.0, 1.0)
-        let width = max(1, Int(ceil(screenRect.width * scale)))
-        let height = max(1, Int(ceil(screenRect.height * scale)))
-        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
-              let context = CGContext(
-                data: nil,
-                width: width,
-                height: height,
-                bitsPerComponent: 8,
-                bytesPerRow: width * 4,
-                space: colorSpace,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-              ) else {
+        guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
             throw ScreenshotCaptureError.emptyImage
         }
 
-        context.interpolationQuality = .none
-        context.translateBy(x: 0, y: CGFloat(height))
-        context.scaleBy(x: scale, y: -scale)
-
-        for display in content.displays {
-            guard let screen = screensByDisplayID[display.displayID] else {
-                continue
-            }
-            let filter = SCContentFilter(display: display, excludingWindows: [])
-            if #available(macOS 14.2, *) {
-                filter.includeMenuBar = true
-            }
-
-            let displayScale = max(CGFloat(filter.pointPixelScale), screen.backingScaleFactor, 1.0)
-            let configuration = SCStreamConfiguration()
-            configuration.width = max(1, Int(ceil(CGFloat(display.width) * displayScale)))
-            configuration.height = max(1, Int(ceil(CGFloat(display.height) * displayScale)))
-            configuration.pixelFormat = kCVPixelFormatType_32BGRA
-            configuration.showsCursor = false
-            configuration.capturesAudio = false
-            configuration.queueDepth = 1
-            configuration.captureResolution = .best
-
-            let image = try await captureImage(contentFilter: filter, configuration: configuration)
-
-            let destination = CGRect(
-                x: screen.frame.minX - screenRect.minX,
-                y: screenRect.maxY - screen.frame.maxY,
-                width: screen.frame.width,
-                height: screen.frame.height
-            )
-            context.draw(image, in: destination)
+        let filter = SCContentFilter(display: display, excludingWindows: [])
+        if #available(macOS 14.2, *) {
+            filter.includeMenuBar = true
         }
 
-        guard let image = context.makeImage() else {
-            throw ScreenshotCaptureError.emptyImage
-        }
-        return image
+        let displayScale = max(CGFloat(filter.pointPixelScale), screen.backingScaleFactor, 1.0)
+        let configuration = SCStreamConfiguration()
+        configuration.width = max(1, Int(ceil(filter.contentRect.width * displayScale)))
+        configuration.height = max(1, Int(ceil(filter.contentRect.height * displayScale)))
+        configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        configuration.showsCursor = false
+        configuration.capturesAudio = false
+        configuration.queueDepth = 1
+        configuration.captureResolution = .best
+
+        let image = try await captureImage(contentFilter: filter, configuration: configuration)
+        return normalizedCopy(of: image) ?? image
     }
 
     private func captureImage(
@@ -219,9 +142,8 @@ struct ScreenshotCapture {
         return (screen.deviceDescription[key] as? NSNumber).map { CGDirectDisplayID($0.uint32Value) }
     }
 
-    private func screen(containing rect: CGRect) -> NSScreen? {
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        return NSScreen.screens.first { $0.frame.contains(center) } ?? NSScreen.main
+    private func screen(containing point: CGPoint) -> NSScreen? {
+        NSScreen.screens.first { $0.frame.contains(point) } ?? NSScreen.main
     }
 
     private func normalizedCopy(of image: CGImage) -> CGImage? {
@@ -276,13 +198,5 @@ private enum ScreenshotCaptureError: LocalizedError {
                 ? "截图成功但未生成输出文件：\(path)"
                 : "截图成功但未生成输出文件：\(path)，stderr：\(stderr)"
         }
-    }
-}
-
-extension [CGRect] {
-    /// 计算多个矩形的最小包围矩形
-    func unionRect() -> CGRect? {
-        guard let first = self.first else { return nil }
-        return self.dropFirst().reduce(first) { $0.union($1) }
     }
 }

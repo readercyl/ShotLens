@@ -49,6 +49,11 @@ rg -n 'NSPanel' "$OVERLAY_WINDOW" "$SELECTION_OVERLAY" >/dev/null
 rg -n 'nonactivatingPanel' "$OVERLAY_WINDOW" "$SELECTION_OVERLAY" >/dev/null
 rg -n 'screenSaver' "$OVERLAY_WINDOW" "$SELECTION_OVERLAY" >/dev/null
 rg -n '\.stationary' "$OVERLAY_WINDOW" "$SELECTION_OVERLAY" >/dev/null
+rg -n 'override func acceptsFirstMouse' "$SELECTION_OVERLAY" >/dev/null
+if rg -n 'for screen in screens' "$SELECTION_OVERLAY" >/dev/null; then
+  echo "Selection overlay must only cover the screen under the mouse." >&2
+  exit 1
+fi
 rg -n 'import ScreenCaptureKit' "$SCREENSHOT_CAPTURE" >/dev/null
 rg -n 'SCScreenshotManager' "$SCREENSHOT_CAPTURE" >/dev/null
 if rg -n '/usr/sbin/screencapture|CGWindowListCreateImage|CGDisplayCreateImage|process\.executableURL|process\.run\(\)' "$SCREENSHOT_CAPTURE" >/dev/null; then

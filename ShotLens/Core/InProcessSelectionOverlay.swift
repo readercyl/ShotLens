@@ -17,7 +17,10 @@ final class InProcessSelectionOverlay {
 
     private func show(frozenScreenshot: FrozenScreenshot?) {
         let screens = NSScreen.screens
-        guard !screens.isEmpty else {
+        let targetScreen = frozenScreenshot.flatMap { snapshot in
+            screens.first { $0.frame == snapshot.screenRect }
+        } ?? screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
+        guard let screen = targetScreen else {
             finish(with: nil)
             return
         }
@@ -32,36 +35,33 @@ final class InProcessSelectionOverlay {
             return event
         }
 
-        for screen in screens {
-            let window = InProcessSelectionWindow(
-                contentRect: screen.frame,
-                styleMask: [.borderless, .nonactivatingPanel],
-                backing: .buffered,
-                defer: false
-            )
-            window.level = .screenSaver
-            window.isOpaque = false
-            window.backgroundColor = .clear
-            window.hasShadow = false
-            window.animationBehavior = .none
-            window.isReleasedWhenClosed = false
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-            window.onCancel = { [weak self] in
-                self?.finish(with: nil)
-            }
-
-            let view = InProcessSelectionView(frame: CGRect(origin: .zero, size: screen.frame.size))
-            view.screenOrigin = screen.frame.origin
-            view.backgroundImage = frozenScreenshot?.cropForScreen(screen.frame)
-            view.onComplete = { [weak self] rect in
-                self?.finish(with: rect)
-            }
-            window.contentView = view
-            window.orderFrontRegardless()
-            windows.append(window)
+        let window = InProcessSelectionWindow(
+            contentRect: screen.frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        window.level = .screenSaver
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.animationBehavior = .none
+        window.isReleasedWhenClosed = false
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        window.onCancel = { [weak self] in
+            self?.finish(with: nil)
         }
 
-        windows.first?.makeKey()
+        let view = InProcessSelectionView(frame: CGRect(origin: .zero, size: screen.frame.size))
+        view.screenOrigin = screen.frame.origin
+        view.backgroundImage = frozenScreenshot?.image
+        view.onComplete = { [weak self] rect in
+            self?.finish(with: rect)
+        }
+        window.contentView = view
+        window.orderFrontRegardless()
+        window.makeKey()
+        windows.append(window)
     }
 
     private func finish(with rect: CGRect?) {
@@ -109,6 +109,10 @@ private final class InProcessSelectionView: NSView {
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         if let backgroundImage {
@@ -165,29 +169,5 @@ private final class InProcessSelectionView: NSView {
             height: rect.height
         )
         onComplete?(screenRect)
-    }
-}
-
-private extension FrozenScreenshot {
-    func cropForScreen(_ screenFrame: CGRect) -> CGImage? {
-        let visibleFrame = screenFrame.intersection(screenRect)
-        guard !visibleFrame.isNull,
-              visibleFrame.width > 0,
-              visibleFrame.height > 0 else {
-            return nil
-        }
-
-        let scaleX = CGFloat(image.width) / max(screenRect.width, 1)
-        let scaleY = CGFloat(image.height) / max(screenRect.height, 1)
-        let minX = max(0, floor((visibleFrame.minX - screenRect.minX) * scaleX))
-        let maxX = min(CGFloat(image.width), ceil((visibleFrame.maxX - screenRect.minX) * scaleX))
-        let minY = max(0, floor((screenRect.maxY - visibleFrame.maxY) * scaleY))
-        let maxY = min(CGFloat(image.height), ceil((screenRect.maxY - visibleFrame.minY) * scaleY))
-
-        guard maxX > minX, maxY > minY else {
-            return nil
-        }
-
-        return image.cropping(to: CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY))
     }
 }

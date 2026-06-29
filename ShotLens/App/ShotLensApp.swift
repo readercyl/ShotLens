@@ -356,6 +356,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let translationSettings = await MainActor.run { mainWindowController.currentDraftSettings() }
 
         let capture = ScreenshotCapture()
+        let targetMouseLocation = NSEvent.mouseLocation
 
         guard capture.hasScreenCaptureAccess() else {
             ShotLensLogger.log("屏幕录制权限未开启，无法冻结屏幕")
@@ -369,7 +370,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let frozenSnapshot: FrozenScreenshot
         do {
-            guard let snapshot = try await capture.captureFrozenDisplay() else {
+            guard let snapshot = try await capture.captureFrozenDisplay(containing: targetMouseLocation) else {
                 ShotLensLogger.log("冻结屏幕失败，未生成截图文件")
                 return
             }

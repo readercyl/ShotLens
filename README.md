@@ -96,6 +96,7 @@ SHOTLENS_CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" bash s
 ```bash
 bash scripts/check-translation-endpoint.sh
 bash scripts/check-app-updater.sh
+bash scripts/check-multi-display-capture.sh
 bash scripts/check-compact-ui.sh
 bash scripts/check-project-integrity.sh
 bash scripts/build-local.sh
@@ -107,6 +108,7 @@ bash scripts/check-dmg-layout.sh
 
 - `check-translation-endpoint.sh`：验证 API 地址规范化、翻译返回解析和连接测试链路。
 - `check-app-updater.sh`：验证 GitHub Release 新版本检测、版本比较和异常状态。
+- `check-multi-display-capture.sh`：验证鼠标所在显示器的独立截图与 Retina/外接屏缩放尺寸。
 - `check-compact-ui.sh`：验证 API 详情默认折叠、更新检测文字按钮和译文原位渲染约束。
 - `check-project-integrity.sh`：检查关键项目文件、OCR 辅助进程、框选辅助进程和 Xcode 引用是否完整。
 - `build-local.sh`：执行本地构建。
