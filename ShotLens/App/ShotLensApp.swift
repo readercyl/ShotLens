@@ -465,8 +465,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay?.setProcessing("正在翻译...")
 
         // 2. 确定源语言和目标语言
-        let sourceLang = ShotLensLanguage.preferredSourceLanguage(for: layoutBlocks)
-        let targetLang = Locale.preferredLanguages.first ?? "zh-Hans"
+        let sourceLang = "en"
+        let targetLang = "zh-Hans"
 
         let provider = TranslationProviderFactory.create(with: settings)
         let texts = layoutBlocks.map { $0.text }

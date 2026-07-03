@@ -10,6 +10,8 @@ ShotLens 是一个轻量级 macOS 菜单栏截图翻译工具。
 - 冻结屏幕后框选翻译区域
 - 松开鼠标完成框选后，自动把原始选区截图写入系统剪贴板
 - 基于 Apple Vision 的独立 OCR 辅助进程
+- 固定识别英文并翻译为简体中文，支持单词、缩写、句子、段落和文章
+- 翻译缩写与简写时会参考同一选区内的其他文字进行语境消歧
 - 兼容 OpenAI 的 API 翻译，内置默认限免额度
 - 支持填写 `/v1`、`/v1/chat/completions`、`/v1/models` 等常见 API 地址形式
 - API 测试按钮会检查真实聊天补全端点，减少 `/models` 不可用和模型格式漂移造成的误报
@@ -99,6 +101,7 @@ bash scripts/check-translation-endpoint.sh
 bash scripts/check-app-updater.sh
 bash scripts/check-multi-display-capture.sh
 bash scripts/check-clipboard-capture.sh
+bash scripts/check-text-layout.sh
 bash scripts/check-compact-ui.sh
 bash scripts/check-project-integrity.sh
 bash scripts/build-local.sh
@@ -112,6 +115,7 @@ bash scripts/check-dmg-layout.sh
 - `check-app-updater.sh`：验证 GitHub Release 新版本检测、版本比较和异常状态。
 - `check-multi-display-capture.sh`：验证鼠标所在显示器的独立截图与 Retina/外接屏缩放尺寸。
 - `check-clipboard-capture.sh`：验证框选完成后自动把原始选区截图写入剪贴板。
+- `check-text-layout.sh`：验证短词不会被误判为图标，并覆盖单词、句子、段落和文章布局。
 - `check-compact-ui.sh`：验证 API 详情默认折叠、更新检测文字按钮和译文原位渲染约束。
 - `check-project-integrity.sh`：检查关键项目文件、OCR 辅助进程、框选辅助进程和 Xcode 引用是否完整。
 - `build-local.sh`：执行本地构建。

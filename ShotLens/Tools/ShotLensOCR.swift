@@ -36,19 +36,7 @@ struct ShotLensOCR {
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
         request.minimumTextHeight = 0
-        request.recognitionLanguages = [
-            "zh-Hans",
-            "zh-Hant",
-            "en-US",
-            "ja-JP",
-            "ko-KR",
-            "fr-FR",
-            "de-DE",
-            "es-ES",
-            "it-IT",
-            "pt-BR",
-            "ru-RU"
-        ]
+        request.recognitionLanguages = ["en-US"]
 
         let handler = VNImageRequestHandler(cgImage: image, options: [:])
         try handler.perform([request])

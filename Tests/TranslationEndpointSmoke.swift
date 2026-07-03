@@ -67,6 +67,7 @@ struct TranslationEndpointSmoke {
         )
         try await assertSingleBlockPlainTextParses()
         try await assertSingleBlockExplanationParses()
+        try await assertAbbreviationUsesSurroundingContext()
         try await assertRepairRequestFixesInvalidBatchResponse()
         try await assertPolicyLikeBatchOutputIsRepaired()
         try await assertSingleItemFallbackRecoversWhenRepairFails()
@@ -359,6 +360,32 @@ struct TranslationEndpointSmoke {
         let result = try await translator.translate(["Hello"], from: "en", to: "zh-Hans")
         guard result == ["你好"] else {
             throw TestFailure("Expected single explanation response to parse, got \(result)")
+        }
+    }
+
+    private static func assertAbbreviationUsesSurroundingContext() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContent = #"["客户关系管理","客户关系管理系统"]"#
+
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+
+        let result = try await translator.translate(
+            ["CRM", "Customer relationship management platform"],
+            from: "en",
+            to: "zh-Hans"
+        )
+        guard result == ["客户关系管理", "客户关系管理系统"] else {
+            throw TestFailure("Expected abbreviation translation to use surrounding OCR context, got \(result)")
+        }
+        let body = MockOpenAIProtocol.requestBodies.first ?? ""
+        guard body.contains("surrounding OCR items as context"),
+              body.contains("CRM"),
+              body.contains("Customer relationship management platform") else {
+            throw TestFailure("Expected one contextual translation request containing the abbreviation and nearby text")
         }
     }
 

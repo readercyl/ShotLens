@@ -3,9 +3,11 @@ import Foundation
 
 enum TextLayoutOptimizer {
     static func merge(_ blocks: [TextBlock]) -> [TextBlock] {
-        let filtered = blocks
+        let readable = blocks
             .map { $0.trimmingText() }
-            .filter { !$0.text.isEmpty && !$0.text.isMostlyPunctuation && !$0.isLikelyIconBlock }
+            .filter { !$0.text.isEmpty && !$0.text.isMostlyPunctuation }
+        let filtered = readable
+            .filter { readable.count == 1 || !$0.isLikelyIconBlock }
             .sorted { lhs, rhs in
                 if abs(lhs.boundingBox.minY - rhs.boundingBox.minY) > 8 {
                     return lhs.boundingBox.minY < rhs.boundingBox.minY
