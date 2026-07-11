@@ -212,11 +212,11 @@ struct AppUpdater {
     NEW_BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$SOURCE_APP/Contents/Info.plist")"
     test -n "$CURRENT_BUNDLE_ID"
     test "$CURRENT_BUNDLE_ID" = "$NEW_BUNDLE_ID"
-    /usr/bin/codesign --verify --deep --strict "$SOURCE_APP"
-
     log "staging app"
     ditto "$SOURCE_APP" "$STAGING_APP"
     test -x "$STAGING_APP/Contents/MacOS/ShotLens"
+    xattr -cr "$STAGING_APP"
+    /usr/bin/codesign --verify --deep --strict "$STAGING_APP"
     mv "$APP_PATH" "$BACKUP_APP"
     if ! mv "$STAGING_APP" "$APP_PATH"; then
       restore_backup

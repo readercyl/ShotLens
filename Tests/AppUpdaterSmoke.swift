@@ -27,6 +27,11 @@ struct AppUpdaterSmoke {
         guard !script.contains("rm -rf \"$APP_PATH\"\n    ditto") else {
             throw TestFailure("Updater must not delete the installed app before staging succeeds")
         }
+        guard let cleanRange = script.range(of: "xattr -cr \"$STAGING_APP\""),
+              let verifyRange = script.range(of: "codesign --verify --deep --strict \"$STAGING_APP\""),
+              cleanRange.lowerBound < verifyRange.lowerBound else {
+            throw TestFailure("Expected staged DMG metadata cleanup before signature verification")
+        }
     }
 
     private static func assertAutomaticCheckSchedule() throws {
