@@ -75,7 +75,8 @@ struct TranslationEndpointSmoke {
         try await assertEchoedRepairPromptDoesNotRenderAsTranslation()
         try await assertLabeledSingleTranslationExtractsChinese()
         try await assertAbbreviationUsesSurroundingContext()
-        try await assertRepairRequestFixesInvalidBatchResponse()
+        try await assertArrowOutputAvoidsRepairRequest()
+        try await assertTypicalLargeSelectionStaysSingleRequest()
         try await assertPolicyLikeBatchOutputDoesNotSpendRepairRequest()
         try await assertRepairFailureDoesNotFanOutRequests()
         try await assertEmptySavedSettingsUseDefaultAPI()
@@ -472,11 +473,8 @@ struct TranslationEndpointSmoke {
         ))
 
         let result = try await translator.translate(["Settings"], from: "en", to: "zh-Hans")
-        guard result == ["设置"] else {
-            throw TestFailure("Expected echoed repair prompt garbage to be repaired away, got \(result)")
-        }
-        guard MockOpenAIProtocol.requestBodies.count == 2 else {
-            throw TestFailure("Expected echoed repair prompt garbage to trigger one repair request")
+        guard result == ["设置"], MockOpenAIProtocol.requestBodies.count == 2 else {
+            throw TestFailure("Expected malformed output to recover with one bounded repair request")
         }
     }
 
@@ -522,7 +520,7 @@ struct TranslationEndpointSmoke {
         }
     }
 
-    private static func assertRepairRequestFixesInvalidBatchResponse() async throws {
+    private static func assertArrowOutputAvoidsRepairRequest() async throws {
         MockOpenAIProtocol.reset()
         MockOpenAIProtocol.assistantContentQueue = [
             "Here are the translations:\nHello => 你好\nWorld => 世界",
@@ -537,11 +535,27 @@ struct TranslationEndpointSmoke {
 
         let result = try await translator.translate(["Hello", "World"], from: "en", to: "zh-Hans")
         guard result == ["你好", "世界"] else {
-            throw TestFailure("Expected repair request to recover JSON array, got \(result)")
+            throw TestFailure("Expected arrow-formatted output to parse locally, got \(result)")
         }
-        guard MockOpenAIProtocol.requestBodies.count == 2,
-              MockOpenAIProtocol.requestBodies[1].contains("Convert this model output") else {
-            throw TestFailure("Expected second request to be a format repair request")
+        guard MockOpenAIProtocol.requestBodies.count == 1 else {
+            throw TestFailure("Expected local arrow parsing without a repair request")
+        }
+    }
+
+    private static func assertTypicalLargeSelectionStaysSingleRequest() async throws {
+        MockOpenAIProtocol.reset()
+        let input = (0..<48).map { "Source \($0)" }
+        let expected = (0..<48).map { "译文\($0)" }
+        MockOpenAIProtocol.assistantContent = String(data: try JSONSerialization.data(withJSONObject: expected), encoding: .utf8)!
+
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+        let result = try await translator.translate(input, from: "en", to: "zh-Hans")
+        guard result == expected, MockOpenAIProtocol.requestBodies.count == 1 else {
+            throw TestFailure("Expected 48 short blocks to translate in one request, requests=\(MockOpenAIProtocol.requestBodies.count)")
         }
     }
 
@@ -596,7 +610,7 @@ struct TranslationEndpointSmoke {
             throw error
         } catch {
             guard MockOpenAIProtocol.requestBodies.count == 2 else {
-                throw TestFailure("Expected only batch and repair requests, got \(MockOpenAIProtocol.requestBodies.count)")
+                throw TestFailure("Expected only one batch request and one bounded repair, got \(MockOpenAIProtocol.requestBodies.count)")
             }
         }
     }

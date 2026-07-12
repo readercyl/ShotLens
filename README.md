@@ -38,7 +38,7 @@ ShotLens 是一个轻量级 macOS 菜单栏截图翻译工具。
 5. 授予屏幕录制权限。
 6. 使用全局快捷键或菜单栏按钮开始截图翻译。
 7. 框选区域后等待 OCR 和翻译完成，结果会显示在覆盖浮窗中。
-8. 结果浮框右上角的透明 pin 图标可钉住/解除钉住；钉住并翻译成功后，下侧控制区会自动隐藏。未钉住时将鼠标停在下侧按钮上可查看“复制译文、重新翻译、复制截图”的说明。
+8. 结果浮框右上角的透明 pin 图标会根据截图背景自动使用黑色或白色；未钉住时图标竖直，钉住后转为 45° 斜向。钉住并翻译成功后，下侧控制区会自动隐藏。未钉住时将鼠标停在下侧按钮上可查看“复制译文、重新翻译、复制截图”的说明。
 
 ## API 配置
 
@@ -59,7 +59,7 @@ https://example.com/v1/models
 
 自备 API 面板里的“清空”和“恢复默认”含义不同：“清空”会完全清除地址、Key 和模型，不再使用默认限免；“恢复默认”会重新启用内置限免配置并隐藏 API 详情。
 
-翻译时会优先要求模型返回 JSON 数组；如果模型偶发返回编号列表、对象、代码块、解释前缀、SSE 边缘残片或控制标记，ShotLens 会先安全清洗，并在结构无效时最多追加一次格式修复。它不会再把一次截图放大成多次逐条串行请求。对于“被拒绝”“高风险”等明显像模型安全判定、而不是源文本翻译的输出，ShotLens 会直接拦截并允许用户重新翻译，避免把误答覆盖到截图上。
+翻译时会优先要求模型返回 JSON 数组；编号列表、对象、代码块、常见箭头分隔、解释前缀、SSE 边缘残片或控制标记会在本地清洗解析。常规框选会尽量合并为一次翻译请求，只有超过安全上下文上限时才分批；只有确实无法在本地解析时才允许追加一次有界格式修复。对于“被拒绝”“高风险”等明显像模型安全判定、而不是源文本翻译的输出，ShotLens 会直接拦截并允许用户重新翻译，避免把误答覆盖到截图上。
 
 ShotLens 默认继续使用 macOS Vision 在本机 OCR：它能直接返回原位覆盖所需的逐块坐标，且不增加图片上传和第二次网络推理。SiliconFlow 的 `deepseek-ai/DeepSeek-OCR` 当前适合整页文本或 Markdown 提取，但没有被 ShotLens 主链路采用；只有在它提供稳定逐块坐标契约，并且隐私、网络成本和端到端延迟实测优于本地 Vision 时才重新评估。
 
@@ -107,6 +107,7 @@ bash scripts/check-clipboard-capture.sh
 bash scripts/check-text-layout.sh
 bash scripts/check-overlay-control-visibility.sh
 bash scripts/check-overlay-layout.sh
+bash scripts/check-overlay-pin-appearance.sh
 bash scripts/check-compact-ui.sh
 bash scripts/check-project-integrity.sh
 bash scripts/build-local.sh

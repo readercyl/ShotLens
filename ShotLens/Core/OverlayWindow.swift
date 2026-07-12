@@ -787,7 +787,9 @@ private final class OverlayBackdropView: NSView {
 
 final class OverlayContentView: NSView {
     var onTogglePin: (() -> Void)?
-    var screenshot: CGImage?
+    var screenshot: CGImage? {
+        didSet { updatePinContrast() }
+    }
     var displayScale: CGFloat = 1.0
     var translatedBlocks: [TranslatedBlock] = []
     private var displayMode: OverlayDisplayMode = .translation
@@ -831,6 +833,22 @@ final class OverlayContentView: NSView {
     override func layout() {
         super.layout()
         pinButton.frame = CGRect(x: max(4, bounds.maxX - 28), y: 4, width: 24, height: 24)
+        updatePinContrast()
+    }
+
+    private func updatePinContrast() {
+        guard let screenshot, bounds.width > 0, bounds.height > 0 else { return }
+        let scaleX = CGFloat(screenshot.width) / bounds.width
+        let scaleY = CGFloat(screenshot.height) / bounds.height
+        let sampleRect = CGRect(
+            x: max(0, CGFloat(screenshot.width) - 28 * scaleX),
+            y: max(0, 4 * scaleY),
+            width: min(CGFloat(screenshot.width), 24 * scaleX),
+            height: min(CGFloat(screenshot.height), 24 * scaleY)
+        ).integral
+        pinButton.usesDarkSymbol = OverlayPinAppearance.usesDarkSymbol(
+            backgroundLuminance: screenshot.averageLuminance(in: sampleRect)
+        )
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -996,6 +1014,7 @@ final class OverlayContentView: NSView {
 
 private final class OverlayPinButton: NSControl {
     var onClick: (() -> Void)?
+    var usesDarkSymbol = false { didSet { needsDisplay = true } }
     var isPinned = false {
         didSet {
             toolTip = isPinned ? "解除钉住" : "钉住浮框"
@@ -1009,12 +1028,53 @@ private final class OverlayPinButton: NSControl {
     override func draw(_ dirtyRect: NSRect) {
         let image = NSImage(systemSymbolName: isPinned ? "pin.fill" : "pin", accessibilityDescription: isPinned ? "解除钉住" : "钉住")
         let symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
-            .applying(.init(paletteColors: [.white]))
-        image?.withSymbolConfiguration(symbolConfiguration)?
-            .draw(in: bounds.insetBy(dx: 6, dy: 6))
+            .applying(.init(paletteColors: [usesDarkSymbol ? .black : .white]))
+        guard let configuredImage = image?.withSymbolConfiguration(symbolConfiguration) else { return }
+        NSGraphicsContext.saveGraphicsState()
+        let transform = NSAffineTransform()
+        transform.translateX(by: bounds.midX, yBy: bounds.midY)
+        transform.rotate(byDegrees: OverlayPinAppearance.symbolRotationDegrees(isPinned: isPinned))
+        transform.translateX(by: -bounds.midX, yBy: -bounds.midY)
+        transform.concat()
+        configuredImage.draw(in: bounds.insetBy(dx: 5, dy: 5))
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     override func mouseDown(with event: NSEvent) { onClick?() }
+}
+
+private extension CGImage {
+    func averageLuminance(in rect: CGRect) -> Double {
+        let clipped = rect.intersection(CGRect(x: 0, y: 0, width: width, height: height))
+        guard !clipped.isNull, clipped.width >= 1, clipped.height >= 1,
+              let crop = cropping(to: clipped) else { return 0 }
+        let size = 8
+        var pixels = [UInt8](repeating: 0, count: size * size * 4)
+        let rendered = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let base = buffer.baseAddress,
+                  let context = CGContext(
+                    data: base,
+                    width: size,
+                    height: size,
+                    bitsPerComponent: 8,
+                    bytesPerRow: size * 4,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                  ) else { return false }
+            context.interpolationQuality = .low
+            context.draw(crop, in: CGRect(x: 0, y: 0, width: size, height: size))
+            return true
+        }
+        guard rendered else { return 0 }
+        var total = 0.0
+        for index in stride(from: 0, to: pixels.count, by: 4) {
+            let red = Double(pixels[index]) / 255
+            let green = Double(pixels[index + 1]) / 255
+            let blue = Double(pixels[index + 2]) / 255
+            total += 0.2126 * red + 0.7152 * green + 0.0722 * blue
+        }
+        return total / Double(size * size)
+    }
 }
 
 fileprivate enum OverlayDisplayMode {
