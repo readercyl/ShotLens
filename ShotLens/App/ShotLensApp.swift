@@ -436,6 +436,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay: OverlayWindow?,
         settings: TranslationSettings
     ) async {
+        let pipelineStartedAt = Date()
         overlay?.setProcessing("正在识别文字...")
 
         let ocr = OCREngine()
@@ -454,21 +455,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlay?.setMessage("未识别到文字")
             return
         }
+        ShotLensLogger.log(String(format: "OCR 完成，识别 %d 个文本块，耗时 %.2fs", textBlocks.count, Date().timeIntervalSince(ocrStartedAt)))
+        let layoutStartedAt = Date()
         let layoutBlocks = TextLayoutOptimizer.merge(textBlocks)
         guard !layoutBlocks.isEmpty else {
             ShotLensLogger.log("OCR 文本块均被过滤，未形成可翻译布局块")
             overlay?.setMessage("未识别到文字")
             return
         }
-        ShotLensLogger.log(String(format: "OCR 完成，原始 %d 个文本块，合并为 %d 个布局块，耗时 %.2fs", textBlocks.count, layoutBlocks.count, Date().timeIntervalSince(ocrStartedAt)))
+        ShotLensLogger.log(String(format: "布局完成，合并为 %d 个段落，耗时 %.2fs", layoutBlocks.count, Date().timeIntervalSince(layoutStartedAt)))
 
-        await translateRecognized(layoutBlocks, overlay: overlay, settings: settings)
+        await translateRecognized(layoutBlocks, overlay: overlay, settings: settings, pipelineStartedAt: pipelineStartedAt)
     }
 
     private func translateRecognized(
         _ layoutBlocks: [TextBlock],
         overlay: OverlayWindow?,
-        settings: TranslationSettings
+        settings: TranslationSettings,
+        pipelineStartedAt: Date
     ) async {
 
         overlay?.setProcessing("正在翻译...")
@@ -501,6 +505,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         overlay?.setTranslatedBlocks(translatedBlocks)
+        ShotLensLogger.log(String(format: "翻译流程总耗时 %.2fs", Date().timeIntervalSince(pipelineStartedAt)))
     }
 
     private func userFacingTranslationFailureMessage(for error: Error) -> String {

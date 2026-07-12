@@ -76,9 +76,8 @@ struct TranslationEndpointSmoke {
         try await assertLabeledSingleTranslationExtractsChinese()
         try await assertAbbreviationUsesSurroundingContext()
         try await assertRepairRequestFixesInvalidBatchResponse()
-        try await assertPolicyLikeBatchOutputIsRepaired()
-        try await assertSingleItemFallbackRecoversWhenRepairFails()
-        try await assertSingleItemFallbackUsesBestEffortWithoutRepair()
+        try await assertPolicyLikeBatchOutputDoesNotSpendRepairRequest()
+        try await assertRepairFailureDoesNotFanOutRequests()
         try await assertEmptySavedSettingsUseDefaultAPI()
         try await assertDefaultFallbackForcesBuiltInEndpointAndModel()
         try await assertCustomSavedSettingsSurviveLoad()
@@ -546,7 +545,7 @@ struct TranslationEndpointSmoke {
         }
     }
 
-    private static func assertPolicyLikeBatchOutputIsRepaired() async throws {
+    private static func assertPolicyLikeBatchOutputDoesNotSpendRepairRequest() async throws {
         MockOpenAIProtocol.reset()
         MockOpenAIProtocol.assistantContentQueue = [
             #"["被拒绝","是高风险"]"#,
@@ -559,21 +558,23 @@ struct TranslationEndpointSmoke {
             model: "test-model"
         ))
 
-        let result = try await translator.translate(
-            ["Personalized model recommender", "Explore agents"],
-            from: "en",
-            to: "zh-Hans"
-        )
-        guard result == ["个性化模型推荐器", "探索智能体"] else {
-            throw TestFailure("Expected policy-like mistranslation to be repaired, got \(result)")
-        }
-        guard MockOpenAIProtocol.requestBodies.count == 2,
-              MockOpenAIProtocol.requestBodies[1].contains("Convert this model output") else {
-            throw TestFailure("Expected suspicious batch output to trigger a repair request")
+        do {
+            _ = try await translator.translate(
+                ["Personalized model recommender", "Explore agents"],
+                from: "en",
+                to: "zh-Hans"
+            )
+            throw TestFailure("Expected suspicious semantic output to fail validation")
+        } catch let error as TestFailure {
+            throw error
+        } catch {
+            guard MockOpenAIProtocol.requestBodies.count == 1 else {
+                throw TestFailure("Semantic validation must not trigger a format repair request")
+            }
         }
     }
 
-    private static func assertSingleItemFallbackRecoversWhenRepairFails() async throws {
+    private static func assertRepairFailureDoesNotFanOutRequests() async throws {
         MockOpenAIProtocol.reset()
         MockOpenAIProtocol.assistantContentQueue = [
             "Translations: hello and world",
@@ -588,36 +589,15 @@ struct TranslationEndpointSmoke {
             model: "test-model"
         ))
 
-        let result = try await translator.translate(["Hello", "World"], from: "en", to: "zh-Hans")
-        guard result == ["你好", "世界"] else {
-            throw TestFailure("Expected per-item fallback to recover translations, got \(result)")
-        }
-        guard MockOpenAIProtocol.requestBodies.count == 4 else {
-            throw TestFailure("Expected batch, repair, and two single-item requests, got \(MockOpenAIProtocol.requestBodies.count)")
-        }
-    }
-
-    private static func assertSingleItemFallbackUsesBestEffortWithoutRepair() async throws {
-        MockOpenAIProtocol.reset()
-        MockOpenAIProtocol.assistantContentQueue = [
-            "Translations: hello and world",
-            "Still not JSON",
-            "Here is the translation: 你好",
-            "Here is the translation: 世界"
-        ]
-
-        let translator = LLMTranslator(settings: TranslationSettings(
-            apiEndpoint: "https://shotlens-test.local/v1",
-            apiKey: "test-key",
-            model: "test-model"
-        ))
-
-        let result = try await translator.translate(["Hello", "World"], from: "en", to: "zh-Hans")
-        guard result == ["你好", "世界"] else {
-            throw TestFailure("Expected best-effort single item fallback to recover translations, got \(result)")
-        }
-        guard MockOpenAIProtocol.requestBodies.count == 4 else {
-            throw TestFailure("Expected batch, repair, and two best-effort single-item requests, got \(MockOpenAIProtocol.requestBodies.count)")
+        do {
+            _ = try await translator.translate(["Hello", "World"], from: "en", to: "zh-Hans")
+            throw TestFailure("Expected invalid repair output to fail without per-item fan-out")
+        } catch let error as TestFailure {
+            throw error
+        } catch {
+            guard MockOpenAIProtocol.requestBodies.count == 2 else {
+                throw TestFailure("Expected only batch and repair requests, got \(MockOpenAIProtocol.requestBodies.count)")
+            }
         }
     }
 

@@ -9,6 +9,8 @@ struct TextLayoutOptimizerSmoke {
         try assertLikelyIconStillFiltersFromMultipleBlocks()
         try assertLeadingSymbolNoiseIsRemovedFromLabels()
         try assertParagraphSpacingCreatesSeparateBlocks()
+        try assertUnfinishedSentenceKeepsShortTailAcrossSlightlyLargerGap()
+        try assertHighConfidenceSingleCharactersAreNotIcons()
 
         print("Text layout optimizer smoke test passed.")
     }
@@ -99,6 +101,36 @@ struct TextLayoutOptimizerSmoke {
             "The second paragraph starts here."
         ] else {
             throw TestFailure("Expected paragraph spacing to preserve two translation blocks, got \(result.map(\.text))")
+        }
+    }
+
+    private static func assertUnfinishedSentenceKeepsShortTailAcrossSlightlyLargerGap() throws {
+        let lines = [
+            block("This sentence continues onto the", y: 0),
+            block("next line", y: 31),
+            block("A new paragraph starts here.", y: 70)
+        ]
+        let result = TextLayoutOptimizer.merge(lines)
+        guard result.map(\.text) == [
+            "This sentence continues onto the next line",
+            "A new paragraph starts here."
+        ] else {
+            throw TestFailure("Expected unfinished sentence tail to remain in its paragraph, got \(result.map(\.text))")
+        }
+    }
+
+    private static func assertHighConfidenceSingleCharactersAreNotIcons() throws {
+        for value in ["a", "I", "1"] {
+            let item = TextBlock(
+                text: value,
+                boundingBox: CGRect(x: 0, y: 0, width: 14, height: 14),
+                detectedLanguage: "en",
+                visualStyle: style(confidence: 0.98, fontSize: 12)
+            )
+            let result = TextLayoutOptimizer.merge([item, block("Example label", y: 24)])
+            guard result.contains(where: { $0.text == value }) else {
+                throw TestFailure("Expected high-confidence real character \(value) to survive icon filtering")
+            }
         }
     }
 

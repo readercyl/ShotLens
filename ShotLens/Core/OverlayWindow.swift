@@ -44,6 +44,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     private var isShowingTranslation = true
     private var isPinned = false
     private var isRetranslating = false
+    private var controlPhase: OverlayControlPhase = .processing
 
     func show(
         croppedScreenshot: CGImage,
@@ -101,15 +102,18 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
 
     @MainActor
     func setProcessing(_ message: String) {
+        controlPhase = .processing
         isShowingTranslation = true
         contentView?.setTranslatedBlocks([])
         contentView?.setDisplayMode(.translation)
         statusWindow?.setMessage(message.shortStatusText)
         closeSaveWindow()
+        applyControlVisibility()
     }
 
     @MainActor
     func setTranslatedBlocks(_ blocks: [TranslatedBlock]) {
+        controlPhase = .success
         isRetranslating = false
         isShowingTranslation = true
         contentView?.setTranslatedBlocks(blocks)
@@ -119,6 +123,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
 
     @MainActor
     func setMessage(_ message: String) {
+        controlPhase = message.contains("失败") ? .failure : .processing
         isRetranslating = false
         isShowingTranslation = true
         contentView?.setTranslatedBlocks([])
@@ -132,6 +137,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
             statusWindow?.setMessage(message)
             closeSaveWindow()
         }
+        applyControlVisibility()
     }
 
     private func makeBackdropWindows() -> [OverlayBackdropWindow] {
@@ -199,6 +205,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     private func togglePinned() {
         isPinned.toggle()
         contentView?.setPinned(isPinned)
+        applyControlVisibility()
     }
 
     @MainActor
@@ -299,6 +306,21 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
             }
         )
         showSaveWindow()
+        applyControlVisibility()
+    }
+
+    private func applyControlVisibility() {
+        let visibility = OverlayControlVisibility.resolve(phase: controlPhase, pinned: isPinned)
+        if visibility.statusVisible {
+            statusWindow?.orderFrontRegardless()
+        } else {
+            statusWindow?.orderOut(nil)
+        }
+        if visibility.actionsVisible {
+            saveWindow?.orderFrontRegardless()
+        } else {
+            saveWindow?.orderOut(nil)
+        }
     }
 
     @MainActor
@@ -598,6 +620,9 @@ private final class StatusActionButtonsView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        copyTextButton.toolTip = "复制译文"
+        retranslateButton.toolTip = "重新翻译"
+        saveButton.toolTip = "复制截图"
         addSubview(copyTextButton)
         addSubview(retranslateButton)
         addSubview(saveButton)
@@ -622,7 +647,7 @@ private final class StatusRetranslateButton: NSControl {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.systemOrange.setFill()
+        NSColor.black.withAlphaComponent(0.58).setFill()
         NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
         let text = "↻" as NSString
         let attributes: [NSAttributedString.Key: Any] = [
@@ -647,7 +672,7 @@ private final class StatusCopyTextButton: NSControl {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.systemBlue.setFill()
+        NSColor.black.withAlphaComponent(0.58).setFill()
         NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
         drawCopyIcon()
     }
@@ -680,7 +705,7 @@ private final class StatusSaveButton: NSControl {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.systemGreen.setFill()
+        NSColor.black.withAlphaComponent(0.58).setFill()
         NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
         drawSaveIcon()
     }
@@ -798,6 +823,7 @@ final class OverlayContentView: NSView {
     private func setupControls() {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+        pinButton.toolTip = "钉住浮框"
         pinButton.onClick = { [weak self] in self?.onTogglePin?() }
         addSubview(pinButton)
     }
@@ -833,12 +859,19 @@ final class OverlayContentView: NSView {
             return lhs.minX < rhs.minX
         }
         let typography = stableTypography(for: sortedBlocks)
+        let sourceRects = sortedBlocks.map { $0.original.boundingBox.scaledDown(by: displayScale) }
+        let coverRects = OverlayLayoutPlanner.plan(
+            sourceRects: sourceRects,
+            in: bounds,
+            minimumSize: OverlayGeometry.minimumReadableSize
+        )
 
-        for block in sortedBlocks {
-            let rect = block.original.boundingBox.scaledDown(by: displayScale)
+        for (index, block) in sortedBlocks.enumerated() {
+            let rect = sourceRects[index]
             let layout = textLayout(
                 for: block.translatedText,
                 baseRect: rect,
+                coverRect: coverRects[index],
                 sourceStyle: block.original.visualStyle,
                 typography: typography
             )
@@ -861,6 +894,7 @@ final class OverlayContentView: NSView {
     private func textLayout(
         for text: String,
         baseRect: CGRect,
+        coverRect: CGRect,
         sourceStyle: TextBlockVisualStyle,
         typography: StableTypography
     ) -> TextRenderLayout {
@@ -871,7 +905,6 @@ final class OverlayContentView: NSView {
         let targetSize = display
             ? min(max(16, typography.displayFontSize), 28)
             : min(max(12, min(sourceFontSize, typography.bodyFontSize)), 21)
-        let coverRect = containedRenderRect(for: baseRect)
         let inset = textInset(for: coverRect)
         let verticalInset = min(max(1, inset * 0.7), max(0, coverRect.height * 0.22))
         let horizontalInset = min(inset, max(0, coverRect.width * 0.14))
@@ -902,33 +935,6 @@ final class OverlayContentView: NSView {
             return block.visualStyle.estimatedFontSize / max(displayScale, 1)
         }
         return block.boundingBox.scaledDown(by: displayScale).height * 0.72
-    }
-
-    private func containedRenderRect(for baseRect: CGRect) -> CGRect {
-        let readableWidth = min(bounds.width, max(baseRect.width, OverlayGeometry.minimumReadableSize.width))
-        let readableHeight = min(bounds.height, max(baseRect.height, OverlayGeometry.minimumReadableSize.height))
-        let proposed = CGRect(
-            x: baseRect.midX - readableWidth / 2,
-            y: baseRect.midY - readableHeight / 2,
-            width: readableWidth,
-            height: readableHeight
-        )
-        let shifted = CGRect(
-            x: min(max(bounds.minX, floor(proposed.minX)), max(bounds.minX, bounds.maxX - proposed.width)),
-            y: min(max(bounds.minY, floor(proposed.minY)), max(bounds.minY, bounds.maxY - proposed.height)),
-            width: proposed.width,
-            height: proposed.height
-        )
-        let minX = max(bounds.minX, floor(shifted.minX))
-        let minY = max(bounds.minY, floor(shifted.minY))
-        let maxX = min(bounds.maxX, ceil(shifted.maxX))
-        let maxY = min(bounds.maxY, ceil(shifted.maxY))
-        return CGRect(
-            x: minX,
-            y: minY,
-            width: max(1, maxX - minX),
-            height: max(1, maxY - minY)
-        )
     }
 
     private func fontThatFits(text: String, in textRect: CGRect, targetSize: CGFloat, display: Bool) -> NSFont {
@@ -990,14 +996,17 @@ final class OverlayContentView: NSView {
 
 private final class OverlayPinButton: NSControl {
     var onClick: (() -> Void)?
-    var isPinned = false { didSet { needsDisplay = true } }
+    var isPinned = false {
+        didSet {
+            toolTip = isPinned ? "解除钉住" : "钉住浮框"
+            needsDisplay = true
+        }
+    }
 
     override var mouseDownCanMoveWindow: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
-        (isPinned ? NSColor.systemBlue : NSColor.black.withAlphaComponent(0.55)).setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
         let image = NSImage(systemSymbolName: isPinned ? "pin.fill" : "pin", accessibilityDescription: isPinned ? "解除钉住" : "钉住")
         let symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
             .applying(.init(paletteColors: [.white]))

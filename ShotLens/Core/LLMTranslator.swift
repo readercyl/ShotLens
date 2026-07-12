@@ -104,8 +104,7 @@ struct LLMTranslator: TranslationProvider {
             translated.append(contentsOf: try await translateBatch(
                 batch,
                 from: sourceLanguage,
-                to: targetLanguage,
-                allowsSingleItemFallback: true
+                to: targetLanguage
             ))
         }
         return translated
@@ -115,8 +114,7 @@ struct LLMTranslator: TranslationProvider {
         _ = try await translateBatch(
             ["Hello"],
             from: sourceLanguage,
-            to: targetLanguage,
-            allowsSingleItemFallback: true
+            to: targetLanguage
         )
     }
 
@@ -133,8 +131,7 @@ struct LLMTranslator: TranslationProvider {
     private func translateBatch(
         _ texts: [String],
         from sourceLanguage: String,
-        to targetLanguage: String,
-        allowsSingleItemFallback: Bool
+        to targetLanguage: String
     ) async throws -> [String] {
         guard settings.isLLMConfigured else {
             throw TranslationError.llmNotConfigured
@@ -145,47 +142,26 @@ struct LLMTranslator: TranslationProvider {
             userPayload: try makeUserPayload(texts: texts, sourceLanguage: sourceLanguage, targetLanguage: targetLanguage)
         )
 
+        let parsed: [String]
         do {
-            return try parseValidatedTranslations(from: content, expectedCount: texts.count, sources: texts)
+            parsed = try parseTranslations(from: content, expectedCount: texts.count)
         } catch {
             ShotLensLogger.log("批量翻译返回格式异常，尝试修复：\(content.logSnippet)")
-            let repairedContent: String
-            do {
-                repairedContent = try await requestAssistantContent(
-                    systemPrompt: repairSystemPrompt(expectedCount: texts.count),
-                    userPayload: makeRepairPayload(
-                        content: content,
-                        expectedCount: texts.count,
-                        targetLanguage: targetLanguage,
-                        sourceTexts: texts
-                    )
+            let repairedContent = try await requestAssistantContent(
+                systemPrompt: repairSystemPrompt(expectedCount: texts.count),
+                userPayload: makeRepairPayload(
+                    content: content,
+                    expectedCount: texts.count,
+                    targetLanguage: targetLanguage,
+                    sourceTexts: texts
                 )
-            } catch {
-                guard allowsSingleItemFallback else {
-                    throw error
-                }
-                ShotLensLogger.log("翻译格式修复请求失败，进入逐条兜底", error: error)
-                return try await translateItemsIndividually(
-                    texts,
-                    from: sourceLanguage,
-                    to: targetLanguage
-                )
-            }
-
-            do {
-                return try parseValidatedTranslations(from: repairedContent, expectedCount: texts.count, sources: texts)
-            } catch {
-                ShotLensLogger.log("翻译格式修复失败，进入逐条兜底：\(repairedContent.logSnippet)")
-                guard allowsSingleItemFallback else {
-                    throw error
-                }
-                return try await translateItemsIndividually(
-                    texts,
-                    from: sourceLanguage,
-                    to: targetLanguage
-                )
-            }
+            )
+            return try parseValidatedTranslations(from: repairedContent, expectedCount: texts.count, sources: texts)
         }
+
+        let finalized = applyDeterministicFallbacks(to: parsed, sources: texts)
+        try validateTranslations(finalized, sources: texts)
+        return finalized
     }
 
     private func requestAssistantContent(systemPrompt: String, userPayload: String) async throws -> String {
@@ -307,11 +283,11 @@ struct LLMTranslator: TranslationProvider {
 
         for (translation, source) in zip(translations, sources) {
             if looksLikePolicyMistranslation(translation, source: source) {
-                ShotLensLogger.log("疑似模型安全判定被拦截，进入修复：\(translation.logSnippet)")
+                ShotLensLogger.log("疑似模型安全判定，已拦截本次输出：\(translation.logSnippet)")
                 throw TranslationError.invalidLLMResponse
             }
             if looksLikeUntranslatedEnglish(translation, source: source) {
-                ShotLensLogger.log("疑似英文原文被直接返回，进入修复：\(translation.logSnippet)")
+                ShotLensLogger.log("疑似英文原文被直接返回，已拦截本次输出：\(translation.logSnippet)")
                 throw TranslationError.invalidLLMResponse
             }
         }
@@ -383,51 +359,6 @@ struct LLMTranslator: TranslationProvider {
             "政策"
         ]
         return sourceTerms.contains { lowercased.contains($0) }
-    }
-
-    private func translateItemsIndividually(_ texts: [String], from sourceLanguage: String, to targetLanguage: String) async throws -> [String] {
-        var translated: [String] = []
-        translated.reserveCapacity(texts.count)
-        for text in texts {
-            let content = try await requestAssistantContent(
-                systemPrompt: primarySystemPrompt(targetLanguage: targetLanguage),
-                userPayload: try makeUserPayload(texts: [text], sourceLanguage: sourceLanguage, targetLanguage: targetLanguage)
-            )
-            do {
-                translated.append(try parseValidatedTranslations(from: content, expectedCount: 1, sources: [text])[0])
-            } catch {
-                let repairedContent: String
-                do {
-                    repairedContent = try await requestAssistantContent(
-                        systemPrompt: repairSystemPrompt(expectedCount: 1),
-                        userPayload: makeRepairPayload(
-                            content: content,
-                            expectedCount: 1,
-                            targetLanguage: targetLanguage,
-                            sourceTexts: [text]
-                        )
-                    )
-                } catch {
-                    if let bestEffort = bestEffortSingleTranslation(from: content),
-                       !looksLikePolicyMistranslation(bestEffort, source: text) {
-                        translated.append(bestEffort)
-                        continue
-                    }
-                    throw error
-                }
-                do {
-                    translated.append(try parseValidatedTranslations(from: repairedContent, expectedCount: 1, sources: [text])[0])
-                } catch {
-                    if let bestEffort = bestEffortSingleTranslation(from: content),
-                       !looksLikePolicyMistranslation(bestEffort, source: text) {
-                        translated.append(bestEffort)
-                    } else {
-                        throw error
-                    }
-                }
-            }
-        }
-        return translated
     }
 
     private func parseAssistantContent(from data: Data) throws -> String {

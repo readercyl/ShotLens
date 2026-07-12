@@ -61,6 +61,16 @@ if rg -n 'checkUpdateIconView|arrow.clockwise|CABasicAnimation|shotlens.update.s
 fi
 rg -n 'minimumReadableSize' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'OverlayPinButton' "$OVERLAY_WINDOW" >/dev/null
+if rg -n 'NSColor\.system(?:Blue|Green|Orange).*setFill' "$OVERLAY_WINDOW" >/dev/null; then
+  echo "Overlay action buttons must use one neutral color." >&2
+  exit 1
+fi
+rg -n 'pinButton\.toolTip = "钉住浮框"' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'toolTip = isPinned \? "解除钉住" : "钉住浮框"' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'copyTextButton\.toolTip = "复制译文"' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'retranslateButton\.toolTip = "重新翻译"' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'saveButton\.toolTip = "复制截图"' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'applyControlVisibility' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'dismissFromOutsideClick' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'onRetranslate' "$OVERLAY_WINDOW" "$SHOTLENS_APP" >/dev/null
 rg -n 'overlay\.onRetranslate = overlay\.onRetry' "$SHOTLENS_APP" >/dev/null
@@ -89,7 +99,7 @@ if rg -n 'SelectionClient\(\)\.select|ShotLensSelect' "$SHOTLENS_APP" "$ROOT_DIR
   exit 1
 fi
 rg -n 'InProcessSelectionOverlay' "$SHOTLENS_APP" "$SELECTION_OVERLAY" >/dev/null
-rg -n 'containedRenderRect\(for: baseRect\)' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'OverlayLayoutPlanner\.plan' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'var best = minimumSize' "$OVERLAY_WINDOW" >/dev/null
 
 echo "Compact UI check passed."

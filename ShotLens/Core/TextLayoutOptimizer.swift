@@ -159,15 +159,22 @@ private struct TextLayoutGroup {
         default:
             gapMultiplier = 0.9
         }
-        let maxGap = max(10, min(groupHeight, blockHeight) * gapMultiplier)
-        guard verticalGap >= -groupHeight * 0.25 && verticalGap <= maxGap else { return false }
-
         let overlap = horizontalOverlap(with: block.boundingBox)
         let minWidth = max(1, min(boundingBox.width, block.boundingBox.width))
         let widthRatio = minWidth / max(1, max(boundingBox.width, block.boundingBox.width))
         let leftAligned = abs(block.boundingBox.minX - boundingBox.minX) <= max(14, groupHeight * 0.75)
         let centerAligned = abs(block.boundingBox.midX - boundingBox.midX) <= max(16, boundingBox.width * 0.12)
         let strongOverlap = overlap / minWidth >= 0.66 && widthRatio >= 0.55
+        let sameColumn = leftAligned || centerAligned || strongOverlap
+        let maxGap = max(10, min(groupHeight, blockHeight) * gapMultiplier)
+        let semanticMaxGap = maxGap + min(8, min(groupHeight, blockHeight) * 0.45)
+        let semanticContinuation = sameColumn
+            && !blocks.last!.text.endsSentence
+            && (block.text.startsLikeContinuation || block.boundingBox.width <= boundingBox.width * 0.72)
+        guard verticalGap >= -groupHeight * 0.25,
+              verticalGap <= maxGap || (semanticContinuation && verticalGap <= semanticMaxGap) else {
+            return false
+        }
         let shortTailLine = leftAligned
             && widthRatio >= (layoutKind == .mixed ? 0.12 : 0.03)
             && (block.text.looksLikeSentenceFragment || block.text.endsSentence)
@@ -304,6 +311,14 @@ private extension String {
             .range(of: #"[。！？.!?]$"#, options: .regularExpression) != nil
     }
 
+    var startsLikeContinuation: Bool {
+        let text = trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = text.unicodeScalars.first else { return false }
+        if CharacterSet.lowercaseLetters.contains(first) { return true }
+        let firstWord = text.split(whereSeparator: { $0.isWhitespace }).first?.lowercased() ?? ""
+        return ["and", "or", "but", "because", "so", "that", "which", "with", "to", "of", "for", "in", "on"].contains(firstWord)
+    }
+
     var isIconGlyphOnly: Bool {
         let scalars = unicodeScalars.filter { !$0.properties.isWhitespace }
         guard !scalars.isEmpty, scalars.count <= 3 else { return false }
@@ -361,11 +376,7 @@ private extension String {
         guard !text.isEmpty else { return false }
         if text == "..." || text == "…" || text == ".." { return true }
         if text.count == 1 {
-            if let scalar = text.unicodeScalars.first {
-                if CharacterSet.decimalDigits.contains(scalar) { return true }
-                if CharacterSet.uppercaseLetters.contains(scalar) { return true }
-                if ["本", "巴", "凸", "口", "□", "▢", "▣", "○", "●"].contains(text) { return true }
-            }
+            if ["本", "巴", "凸", "口", "□", "▢", "▣", "○", "●"].contains(text) { return true }
         }
         return isIconGlyphOnly
     }

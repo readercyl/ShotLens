@@ -38,7 +38,7 @@ ShotLens 是一个轻量级 macOS 菜单栏截图翻译工具。
 5. 授予屏幕录制权限。
 6. 使用全局快捷键或菜单栏按钮开始截图翻译。
 7. 框选区域后等待 OCR 和翻译完成，结果会显示在覆盖浮窗中。
-8. 结果浮框右上角的小圆点可钉住/解除钉住；底部橙色按钮会对本次截图重新执行 OCR 和翻译，不会再次截图。
+8. 结果浮框右上角的透明 pin 图标可钉住/解除钉住；钉住并翻译成功后，下侧控制区会自动隐藏。未钉住时将鼠标停在下侧按钮上可查看“复制译文、重新翻译、复制截图”的说明。
 
 ## API 配置
 
@@ -59,7 +59,9 @@ https://example.com/v1/models
 
 自备 API 面板里的“清空”和“恢复默认”含义不同：“清空”会完全清除地址、Key 和模型，不再使用默认限免；“恢复默认”会重新启用内置限免配置并隐藏 API 详情。
 
-翻译时会优先要求模型返回 JSON 数组；如果模型偶发返回编号列表、对象、代码块、解释前缀、SSE 边缘残片或控制标记，ShotLens 会先安全清洗，再按需修复格式并逐条兜底翻译，尽量避免整张截图失败。对于“被拒绝”“高风险”等明显像模型安全判定、而不是源文本翻译的输出，ShotLens 会拦截并重新修复，避免把误答覆盖到截图上。
+翻译时会优先要求模型返回 JSON 数组；如果模型偶发返回编号列表、对象、代码块、解释前缀、SSE 边缘残片或控制标记，ShotLens 会先安全清洗，并在结构无效时最多追加一次格式修复。它不会再把一次截图放大成多次逐条串行请求。对于“被拒绝”“高风险”等明显像模型安全判定、而不是源文本翻译的输出，ShotLens 会直接拦截并允许用户重新翻译，避免把误答覆盖到截图上。
+
+ShotLens 默认继续使用 macOS Vision 在本机 OCR：它能直接返回原位覆盖所需的逐块坐标，且不增加图片上传和第二次网络推理。SiliconFlow 的 `deepseek-ai/DeepSeek-OCR` 当前适合整页文本或 Markdown 提取，但没有被 ShotLens 主链路采用；只有在它提供稳定逐块坐标契约，并且隐私、网络成本和端到端延迟实测优于本地 Vision 时才重新评估。
 
 用户自己填写的 API 地址、Key 和模型会保存在 macOS 用户配置中。升级 App 不会清空这些配置；只有点击“清空”或“恢复默认”才会主动改变 API 设置。
 
@@ -103,6 +105,8 @@ bash scripts/check-app-updater.sh
 bash scripts/check-multi-display-capture.sh
 bash scripts/check-clipboard-capture.sh
 bash scripts/check-text-layout.sh
+bash scripts/check-overlay-control-visibility.sh
+bash scripts/check-overlay-layout.sh
 bash scripts/check-compact-ui.sh
 bash scripts/check-project-integrity.sh
 bash scripts/build-local.sh
@@ -117,6 +121,8 @@ bash scripts/check-dmg-layout.sh
 - `check-multi-display-capture.sh`：验证鼠标所在显示器的独立截图与 Retina/外接屏缩放尺寸。
 - `check-clipboard-capture.sh`：验证框选完成后自动把原始选区截图写入剪贴板。
 - `check-text-layout.sh`：验证短词不会被误判为图标，并覆盖单词、句子、段落和文章布局。
+- `check-overlay-control-visibility.sh`：验证钉住、处理中、成功和失败状态下的下侧控制区显隐。
+- `check-overlay-layout.sh`：验证相邻段落的原位译文覆盖区域不会重叠或越出截图。
 - `check-compact-ui.sh`：验证 API 详情默认折叠、更新检测文字按钮和译文原位渲染约束。
 - `check-project-integrity.sh`：检查关键项目文件、OCR 辅助进程、框选辅助进程和 Xcode 引用是否完整。
 - `build-local.sh`：执行本地构建。

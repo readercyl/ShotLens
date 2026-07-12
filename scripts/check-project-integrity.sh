@@ -11,16 +11,22 @@ required_files=(
   "$ROOT_DIR/ShotLens/Core/LLMTranslator.swift"
   "$ROOT_DIR/ShotLens/Core/LLMConnectionChecker.swift"
   "$ROOT_DIR/ShotLens/Core/AppUpdater.swift"
+  "$ROOT_DIR/ShotLens/Core/OverlayControlVisibility.swift"
+  "$ROOT_DIR/ShotLens/Core/OverlayLayoutPlanner.swift"
   "$ROOT_DIR/Tests/TranslationEndpointSmoke.swift"
   "$ROOT_DIR/Tests/AppUpdaterSmoke.swift"
   "$ROOT_DIR/Tests/MultiDisplayCaptureSmoke.swift"
   "$ROOT_DIR/Tests/ClipboardManagerSmoke.swift"
   "$ROOT_DIR/Tests/TextLayoutOptimizerSmoke.swift"
+  "$ROOT_DIR/Tests/OverlayControlVisibilitySmoke.swift"
+  "$ROOT_DIR/Tests/OverlayLayoutSmoke.swift"
   "$ROOT_DIR/scripts/check-app-updater.sh"
   "$ROOT_DIR/scripts/check-multi-display-capture.sh"
   "$ROOT_DIR/scripts/check-clipboard-capture.sh"
   "$ROOT_DIR/scripts/check-text-layout.sh"
   "$ROOT_DIR/scripts/check-compact-ui.sh"
+  "$ROOT_DIR/scripts/check-overlay-control-visibility.sh"
+  "$ROOT_DIR/scripts/check-overlay-layout.sh"
   "$ROOT_DIR/scripts/ensure-local-signing-cert.sh"
   "$ROOT_DIR/scripts/check-release-signature.sh"
 )
@@ -50,6 +56,8 @@ if rg -n 'ShotLensSelect|SelectionClient' "$ROOT_DIR/scripts/build-local.sh" "$R
 fi
 rg -n 'LLMConnectionChecker.swift' "$ROOT_DIR/ShotLens.xcodeproj/project.pbxproj" >/dev/null
 rg -n 'AppUpdater.swift' "$ROOT_DIR/ShotLens.xcodeproj/project.pbxproj" >/dev/null
+rg -n 'OverlayControlVisibility.swift' "$ROOT_DIR/ShotLens.xcodeproj/project.pbxproj" >/dev/null
+rg -n 'OverlayLayoutPlanner.swift' "$ROOT_DIR/ShotLens.xcodeproj/project.pbxproj" >/dev/null
 rg -n 'InProcessSelectionOverlay.swift' "$ROOT_DIR/ShotLens.xcodeproj/project.pbxproj" >/dev/null
 rg -n "<string>$EXPECTED_BUNDLE_IDENTIFIER</string>" "$ROOT_DIR/ShotLens/App/Info.plist" >/dev/null
 rg -n "<string>$EXPECTED_BUNDLE_IDENTIFIER</string>" "$ROOT_DIR/scripts/build-local.sh" >/dev/null
