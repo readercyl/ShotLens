@@ -29,7 +29,7 @@ enum AppUpdateCheckResult: CustomStringConvertible {
 }
 
 struct AppUpdater {
-    static let repository = "qcsidios/ShotLens"
+    static let repository = "readercyl/ShotLens"
     static let latestReleaseURL = URL(string: "https://api.github.com/repos/\(repository)/releases/latest")!
     static let automaticCheckInterval: TimeInterval = 24 * 60 * 60
 

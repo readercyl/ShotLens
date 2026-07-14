@@ -48,7 +48,7 @@ EOF
 fi
 
 gh release create "$VERSION" "$DMG_PATH" \
-  --repo qcsidios/ShotLens \
+  --repo readercyl/ShotLens \
   --title "ShotLens $VERSION" \
   --notes-file "$RELEASE_NOTES_PATH"
 

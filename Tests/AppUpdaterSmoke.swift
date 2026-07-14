@@ -117,7 +117,7 @@ struct AppUpdaterSmoke {
         """
         {
           "tag_name": "\(tag)",
-          "html_url": "https://github.com/qcsidios/ShotLens/releases/tag/\(tag)",
+          "html_url": "https://github.com/readercyl/ShotLens/releases/tag/\(tag)",
           "assets": [
             {
               "name": "\(assetName)",
