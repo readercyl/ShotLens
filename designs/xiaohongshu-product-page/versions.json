@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "currentVersion": "v2",
+  "fileNamePattern": "shotlens-xhs-{version}-{sequence}-{purpose}-{format}.png",
+  "versions": [
+    {
+      "id": "v1",
+      "status": "archived",
+      "createdAt": "2026-07-15T07:03:15.939Z",
+      "summary": "首版商品主图、轮播图与长详情页"
+    },
+    {
+      "id": "v2",
+      "status": "current",
+      "createdAt": "2026-07-15T08:20:00.000Z",
+      "summary": "手机端可读性、真实控制台与翻译结果界面优化"
+    }
+  ]
+}

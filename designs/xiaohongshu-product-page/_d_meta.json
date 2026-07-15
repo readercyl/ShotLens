@@ -6,12 +6,12 @@
     "ShotLens 小红书商品详情页": {
       "versions": [
         {
-          "path": "index-v1.html",
+          "path": "versions/v1/index.html",
           "createdAt": "2026-07-15T07:03:15.939Z",
           "status": "changes-requested"
         },
         {
-          "path": "index.html",
+          "path": "versions/v2/index.html",
           "createdAt": "2026-07-15T08:20:00.000Z",
           "status": "needs-review"
         }
@@ -20,7 +20,7 @@
     "ShotLens 手机阅读预览": {
       "versions": [
         {
-          "path": "mobile-preview.html",
+          "path": "versions/v2/mobile-preview.html",
           "createdAt": "2026-07-15T08:20:00.000Z",
           "status": "needs-review"
         }
