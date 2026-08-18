@@ -297,8 +297,8 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
 
     func windowDidMove(_ notification: Notification) {
         guard let resultWindow else { return }
-        toolbarWindow?.updateAnchorRect(resultWindow.frame)
-        pinWindow?.updateAnchorRect(resultWindow.frame)
+        toolbarWindow?.followAnchorRect(resultWindow.frame)
+        pinWindow?.followAnchorRect(resultWindow.frame)
     }
 
     @MainActor
@@ -439,6 +439,19 @@ private final class OverlayToolbarWindow: NSPanel {
         updateFrame()
     }
 
+    func followAnchorRect(_ rect: CGRect) {
+        let delta = CGPoint(x: rect.minX - anchorRect.minX, y: rect.minY - anchorRect.minY)
+        anchorRect = rect
+        var origin = CGPoint(x: frame.minX + delta.x, y: frame.minY + delta.y)
+        let screenFrame = NSScreen.screens.first { $0.frame.intersects(rect) }?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+            ?? rect
+        let safeFrame = screenFrame.insetBy(dx: 8, dy: 8)
+        origin.x = min(max(origin.x, safeFrame.minX), safeFrame.maxX - frame.width)
+        origin.y = min(max(origin.y, safeFrame.minY), safeFrame.maxY - frame.height)
+        setFrameOrigin(origin)
+    }
+
     private func updateFrame() {
         let size = toolbarView.preferredSize
         toolbarView.frame = CGRect(origin: .zero, size: size)
@@ -566,7 +579,7 @@ private final class OverlayToolbarView: NSView {
         case .processing, .failure:
             break
         }
-        messageLabel.frame = CGRect(x: 8, y: 3, width: 66, height: 28)
+        messageLabel.frame = CGRect(x: 8, y: 0, width: 66, height: 34)
         modeButton.frame = CGRect(x: 82, y: 3, width: 28, height: 28)
         copyButton.frame = CGRect(x: 116, y: 3, width: 28, height: 28)
         retranslateButton.frame = CGRect(x: 150, y: 3, width: 28, height: 28)
@@ -786,8 +799,20 @@ private final class OverlayPinWindow: NSPanel {
     }
 
     func updateAnchorRect(_ rect: CGRect) {
+        followAnchorRect(rect)
+    }
+
+    func followAnchorRect(_ rect: CGRect) {
+        let delta = CGPoint(x: rect.minX - anchorRect.minX, y: rect.minY - anchorRect.minY)
         anchorRect = rect
-        setFrame(Self.frame(for: rect), display: true)
+        var origin = CGPoint(x: frame.minX + delta.x, y: frame.minY + delta.y)
+        let screenFrame = NSScreen.screens.first { $0.frame.intersects(rect) }?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+            ?? rect
+        let safeFrame = screenFrame.insetBy(dx: 8, dy: 8)
+        origin.x = min(max(origin.x, safeFrame.minX), safeFrame.maxX - frame.width)
+        origin.y = min(max(origin.y, safeFrame.minY), safeFrame.maxY - frame.height)
+        setFrameOrigin(origin)
     }
 
     private static func frame(for anchorRect: CGRect) -> CGRect {
@@ -1492,19 +1517,9 @@ private final class OverlayPinButton: NSControl {
     override func mouseExited(with event: NSEvent) { isHovered = false }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.windowBackgroundColor.withAlphaComponent(0.94).setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
-        NSColor.separatorColor.withAlphaComponent(0.75).setStroke()
-        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 7, yRadius: 7)
-        border.lineWidth = 1
-        border.stroke()
-        if isPressed || isHovered {
-            NSColor.labelColor.withAlphaComponent(isPressed ? 0.18 : 0.1).setFill()
-            NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
-        }
         let image = NSImage(systemSymbolName: isPinned ? "pin.fill" : "pin", accessibilityDescription: isPinned ? "解除钉住" : "钉住")
         let symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
-            .applying(.init(paletteColors: [symbolColor]))
+            .applying(.init(paletteColors: [isPressed || isHovered ? NSColor.controlAccentColor : symbolColor]))
         guard let configuredImage = image?.withSymbolConfiguration(symbolConfiguration) else { return }
         let imageSize = configuredImage.size
         let imageRect = CGRect(
