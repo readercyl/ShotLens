@@ -54,6 +54,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     private var resultWindow: OverlayResultWindow?
     private var statusWindow: OverlayStatusWindow?
     private var saveWindow: OverlaySaveWindow?
+    private var pinWindow: OverlayPinWindow?
     private var backdropWindows: [OverlayBackdropWindow] = []
     private var contentView: OverlayContentView?
     private var outsideClickMonitor: Any?
@@ -101,19 +102,27 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         let contentView = OverlayContentView(frame: NSRect(origin: .zero, size: windowRect.size))
         contentView.screenshot = croppedScreenshot
         contentView.displayScale = scale
-        contentView.onTogglePin = { [weak self] in self?.togglePinned() }
         window.contentView = contentView
 
         let statusWindow = OverlayStatusWindow(anchorRect: windowRect)
         statusWindow.setMessage("正在识别")
 
+        let pinWindow = OverlayPinWindow(anchorRect: windowRect)
+        pinWindow.setScreenshot(croppedScreenshot)
+        pinWindow.onTogglePin = { [weak self] in self?.togglePinned() }
+
         self.resultWindow = window
         self.statusWindow = statusWindow
+        self.pinWindow = pinWindow
         self.contentView = contentView
+
+        window.addChildWindow(statusWindow, ordered: .above)
+        window.addChildWindow(pinWindow, ordered: .above)
 
         backdropWindows.forEach { $0.orderFrontRegardless() }
         window.orderFrontRegardless()
         statusWindow.orderFrontRegardless()
+        pinWindow.orderFrontRegardless()
     }
 
     @MainActor
@@ -204,6 +213,9 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
                 if self.saveWindow?.frame.contains(mouseLocation) == true {
                     return
                 }
+                if self.pinWindow?.frame.contains(mouseLocation) == true {
+                    return
+                }
                 self.dismissFromOutsideClick()
             }
         }
@@ -224,7 +236,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
 
     private func togglePinned() {
         isPinned.toggle()
-        contentView?.setPinned(isPinned)
+        pinWindow?.setPinned(isPinned)
         applyControlVisibility()
     }
 
@@ -237,11 +249,18 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        if let resultWindow {
+            if let statusWindow { resultWindow.removeChildWindow(statusWindow) }
+            if let saveWindow { resultWindow.removeChildWindow(saveWindow) }
+            if let pinWindow { resultWindow.removeChildWindow(pinWindow) }
+        }
         resultWindow = nil
         statusWindow?.close()
         statusWindow = nil
         saveWindow?.close()
         saveWindow = nil
+        pinWindow?.close()
+        pinWindow = nil
         contentView = nil
         closeBackdropWindows()
         finishDismiss()
@@ -273,11 +292,8 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     }
 
     func windowDidMove(_ notification: Notification) {
-        guard let resultWindow else { return }
-        statusWindow?.updateAnchorRect(resultWindow.frame)
-        if let statusWindow {
-            saveWindow?.updateStatusFrame(statusWindow.frame)
-        }
+        // statusWindow、saveWindow 和 pinWindow 都是 resultWindow 的 child window，
+        // 由 AppKit 在同一移动事务中同步跟随。
     }
 
     @MainActor
@@ -336,6 +352,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         } else {
             saveWindow?.orderOut(nil)
         }
+        pinWindow?.orderFrontRegardless()
     }
 
     @MainActor
@@ -356,6 +373,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         window.onRetranslate = { [weak self] in
             self?.beginRetranslation()
         }
+        resultWindow?.addChildWindow(window, ordered: .above)
         saveWindow = window
         window.orderFrontRegardless()
     }
@@ -782,9 +800,9 @@ private final class OverlayPinWindow: NSPanel {
             width: min(36, CGFloat(screenshot.width)),
             height: min(36, CGFloat(screenshot.height))
         )
-        pinButton.usesDarkSymbol = OverlayPinAppearance.usesDarkSymbol(
+        pinButton.symbolColor = OverlayPinAppearance.usesDarkSymbol(
             backgroundLuminance: screenshot.averageLuminance(in: sampleRect)
-        )
+        ) ? .black : .white
     }
 
     private static func frame(for anchorRect: CGRect) -> CGRect {
@@ -1249,17 +1267,12 @@ private final class OverlayBackdropView: NSView {
 }
 
 final class OverlayContentView: NSView {
-    var onTogglePin: (() -> Void)?
     var screenshot: CGImage? {
-        didSet {
-            updatePinContrast()
-            needsDisplay = true
-        }
+        didSet { needsDisplay = true }
     }
     var displayScale: CGFloat = 1.0
     var translatedBlocks: [TranslatedBlock] = []
     private var displayMode: OverlayDisplayMode = .translation
-    private let pinButton = OverlayPinButton(frame: CGRect(x: 0, y: 0, width: 24, height: 24))
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -1279,10 +1292,6 @@ final class OverlayContentView: NSView {
         needsDisplay = true
     }
 
-    func setPinned(_ pinned: Bool) {
-        pinButton.isPinned = pinned
-    }
-
     fileprivate func setDisplayMode(_ mode: OverlayDisplayMode) {
         displayMode = mode
         needsDisplay = true
@@ -1291,30 +1300,10 @@ final class OverlayContentView: NSView {
     private func setupControls() {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
-        pinButton.toolTip = "钉住浮框"
-        pinButton.onClick = { [weak self] in self?.onTogglePin?() }
-        addSubview(pinButton)
     }
 
     override func layout() {
         super.layout()
-        pinButton.frame = CGRect(x: max(4, bounds.maxX - 28), y: 4, width: 24, height: 24)
-        updatePinContrast()
-    }
-
-    private func updatePinContrast() {
-        guard let screenshot, bounds.width > 0, bounds.height > 0 else { return }
-        let scaleX = CGFloat(screenshot.width) / bounds.width
-        let scaleY = CGFloat(screenshot.height) / bounds.height
-        let sampleRect = CGRect(
-            x: max(0, CGFloat(screenshot.width) - 28 * scaleX),
-            y: max(0, 4 * scaleY),
-            width: min(CGFloat(screenshot.width), 24 * scaleX),
-            height: min(CGFloat(screenshot.height), 24 * scaleY)
-        ).integral
-        pinButton.symbolColor = OverlayPinAppearance.usesDarkSymbol(
-            backgroundLuminance: screenshot.averageLuminance(in: sampleRect)
-        ) ? .black : .white
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -1352,6 +1341,16 @@ final class OverlayContentView: NSView {
             ).intersection(bounds)
         }
 
+        if shouldReflow(sortedBlocks: sortedBlocks, sourceRects: sourceRects) {
+            drawReflowedTranslations(
+                sortedBlocks: sortedBlocks,
+                sourceRects: sourceRects,
+                screenshotSize: screenshotSize,
+                paragraphStyle: paragraphStyle
+            )
+            return
+        }
+
         for (index, block) in sortedBlocks.enumerated() {
             let rect = sourceRects[index]
             guard rect.width > 0, rect.height > 0 else { continue }
@@ -1361,24 +1360,7 @@ final class OverlayContentView: NSView {
                 sourceStyle: block.original.visualStyle
             )
 
-            if let restored = OverlayTextBackgroundRestorer.restoredPatch(
-                from: screenshot,
-                pixelRect: block.original.boundingBox,
-                sourceStyle: block.original.visualStyle
-            ) {
-                let restoredPixelRect = OverlayTextBackgroundRestorer.restorationPixelRect(
-                    for: block.original.boundingBox,
-                    imageSize: screenshotSize
-                )
-                let restoredDisplayRect = OverlayGeometry.displayRect(
-                    forPixelRect: restoredPixelRect,
-                    screenshotPixelSize: screenshotSize,
-                    displayBounds: bounds
-                )
-                NSImage(cgImage: restored, size: restoredDisplayRect.size).draw(in: restoredDisplayRect)
-            } else {
-                drawFallbackBackground(in: rect, forPixelRect: block.original.boundingBox)
-            }
+            restoreBackground(for: block, screenshotSize: screenshotSize, displayRect: rect)
 
             let backgroundColor = sampledBackgroundColor(forPixelRect: block.original.boundingBox)
 
@@ -1394,6 +1376,86 @@ final class OverlayContentView: NSView {
                 in: layout.textRect,
                 withAttributes: attrs
             )
+        }
+    }
+
+    private func shouldReflow(
+        sortedBlocks: [TranslatedBlock],
+        sourceRects: [CGRect]
+    ) -> Bool {
+        guard sortedBlocks.count >= 2,
+              sourceRects.count == sortedBlocks.count,
+              sourceRects.allSatisfy({ $0.width > 0 && $0.height > 0 }) else {
+            return false
+        }
+        let first = sourceRects[0]
+        let lineHeight = max(1, first.height)
+        let sameFlow = sourceRects.dropFirst().allSatisfy {
+            abs($0.minX - first.minX) <= max(24, lineHeight * 1.5)
+        }
+        guard sameFlow else { return false }
+        return sortedBlocks.enumerated().contains { index, block in
+            textLayout(
+                for: block.translatedText,
+                baseRect: sourceRects[index],
+                sourceStyle: block.original.visualStyle
+            ).font.pointSize < 10.5
+        }
+    }
+
+    private func drawReflowedTranslations(
+        sortedBlocks: [TranslatedBlock],
+        sourceRects: [CGRect],
+        screenshotSize: CGSize,
+        paragraphStyle: NSParagraphStyle
+    ) {
+        guard let first = sortedBlocks.first else { return }
+        for (index, block) in sortedBlocks.enumerated() {
+            restoreBackground(for: block, screenshotSize: screenshotSize, displayRect: sourceRects[index])
+        }
+
+        let flowRect = sourceRects.dropFirst().reduce(sourceRects[0]) { $0.union($1) }
+        let text = sortedBlocks.map(\.translatedText).joined(separator: "\n")
+        let pixelScaleY = screenshot.map { CGFloat($0.height) / max(bounds.height, 1) } ?? max(displayScale, 1)
+        let sourceSizes = sortedBlocks.map { block in
+            block.original.visualStyle.estimatedFontSize > 0
+                ? block.original.visualStyle.estimatedFontSize / max(pixelScaleY, 1)
+                : 14
+        }
+        let targetSize = min(20, max(11, sourceSizes.reduce(0, +) / CGFloat(max(1, sourceSizes.count))))
+        let font = fontThatFits(text: text, in: flowRect, targetSize: targetSize, minimumSize: 11)
+        let backgroundColor = sampledBackgroundColor(forPixelRect: first.original.boundingBox)
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: resolvedTextColor(sourceStyle: first.original.visualStyle, backgroundColor: backgroundColor),
+            .paragraphStyle: paragraphStyle
+        ]
+        (text as NSString).draw(in: flowRect, withAttributes: attrs)
+    }
+
+    private func restoreBackground(
+        for block: TranslatedBlock,
+        screenshotSize: CGSize,
+        displayRect: CGRect
+    ) {
+        guard let screenshot else { return }
+        if let restored = OverlayTextBackgroundRestorer.restoredPatch(
+            from: screenshot,
+            pixelRect: block.original.boundingBox,
+            sourceStyle: block.original.visualStyle
+        ) {
+            let restoredPixelRect = OverlayTextBackgroundRestorer.restorationPixelRect(
+                for: block.original.boundingBox,
+                imageSize: screenshotSize
+            )
+            let restoredDisplayRect = OverlayGeometry.displayRect(
+                forPixelRect: restoredPixelRect,
+                screenshotPixelSize: screenshotSize,
+                displayBounds: bounds
+            )
+            NSImage(cgImage: restored, size: restoredDisplayRect.size).draw(in: restoredDisplayRect)
+        } else {
+            drawFallbackBackground(in: displayRect, forPixelRect: block.original.boundingBox)
         }
     }
 
@@ -1448,10 +1510,9 @@ final class OverlayContentView: NSView {
         return TextRenderLayout(textRect: textRect, font: font)
     }
 
-    private func fontThatFits(text: String, in textRect: CGRect, targetSize: CGFloat) -> NSFont {
+    private func fontThatFits(text: String, in textRect: CGRect, targetSize: CGFloat, minimumSize: CGFloat = 8) -> NSFont {
         let width = max(1, textRect.width)
         let height = max(1, textRect.height)
-        let minimumSize: CGFloat = 8
         var low = minimumSize
         var high = max(targetSize, low)
         var best = minimumSize

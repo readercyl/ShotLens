@@ -52,8 +52,14 @@ if rg -n 'checkUpdateIconView|arrow.clockwise|CABasicAnimation|shotlens.update.s
 fi
 rg -n 'OverlayPinButton' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'let statusWindow = OverlayStatusWindow' "$OVERLAY_WINDOW" >/dev/null
-rg -n 'contentView\.onTogglePin' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'let pinWindow = OverlayPinWindow' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'showSaveWindow' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'window\.addChildWindow\(statusWindow, ordered: \.above\)' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'window\.addChildWindow\(pinWindow, ordered: \.above\)' "$OVERLAY_WINDOW" >/dev/null
+if rg -n 'statusWindow\?\.updateAnchorRect|saveWindow\?\.updateStatusFrame' "$OVERLAY_WINDOW" >/dev/null; then
+  echo "Result controls must follow as child windows, not through manual move callbacks." >&2
+  exit 1
+fi
 if rg -n 'NSColor\.system(?:Blue|Green|Orange).*setFill' "$OVERLAY_WINDOW" >/dev/null; then
   echo "Overlay action buttons must use one neutral color." >&2
   exit 1
