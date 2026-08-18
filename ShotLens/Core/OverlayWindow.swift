@@ -237,6 +237,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     private func togglePinned() {
         isPinned.toggle()
         pinWindow?.setPinned(isPinned)
+        syncControlWindows()
         applyControlVisibility()
     }
 
@@ -292,8 +293,16 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     }
 
     func windowDidMove(_ notification: Notification) {
-        // statusWindow、saveWindow 和 pinWindow 都是 resultWindow 的 child window，
-        // 由 AppKit 在同一移动事务中同步跟随。
+        syncControlWindows()
+    }
+
+    private func syncControlWindows() {
+        guard let resultWindow else { return }
+        statusWindow?.syncAnchorRect(resultWindow.frame)
+        if let statusWindow {
+            saveWindow?.syncStatusFrame(statusWindow.frame)
+        }
+        pinWindow?.syncAnchorRect(resultWindow.frame)
     }
 
     @MainActor
@@ -805,6 +814,14 @@ private final class OverlayPinWindow: NSPanel {
         ) ? .black : .white
     }
 
+    func syncAnchorRect(_ rect: CGRect) {
+        anchorRect = rect
+        let target = Self.frame(for: rect)
+        if abs(target.minX - frame.minX) > 0.5 || abs(target.minY - frame.minY) > 0.5 {
+            setFrameOrigin(target.origin)
+        }
+    }
+
     private static func frame(for anchorRect: CGRect) -> CGRect {
         let size = CGSize(width: 28, height: 28)
         let gap: CGFloat = 8
@@ -893,6 +910,14 @@ private final class OverlayStatusWindow: NSPanel {
         setFrame(statusFrame(size: size), display: true)
     }
 
+    func syncAnchorRect(_ rect: CGRect) {
+        anchorRect = rect
+        let target = statusFrame(size: frame.size)
+        if abs(target.minX - frame.minX) > 0.5 || abs(target.minY - frame.minY) > 0.5 {
+            setFrameOrigin(target.origin)
+        }
+    }
+
     private func statusFrame(size: CGSize) -> CGRect {
         let gap: CGFloat = 8
         let screenFrame = NSScreen.screens.first { $0.frame.intersects(anchorRect) }?.visibleFrame
@@ -944,6 +969,13 @@ private final class OverlaySaveWindow: NSPanel {
 
     func updateStatusFrame(_ statusFrame: CGRect) {
         setFrame(Self.frame(for: statusFrame), display: true)
+    }
+
+    func syncStatusFrame(_ statusFrame: CGRect) {
+        let target = Self.frame(for: statusFrame)
+        if abs(target.minX - frame.minX) > 0.5 || abs(target.minY - frame.minY) > 0.5 {
+            setFrameOrigin(target.origin)
+        }
     }
 
     private static func frame(for statusFrame: CGRect) -> CGRect {
