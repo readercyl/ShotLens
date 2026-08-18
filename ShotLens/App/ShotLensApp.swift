@@ -579,7 +579,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func userFacingTranslationFailureMessage(for error: Error) -> String {
-        "翻译失败"
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut:
+                return "翻译失败：网络超时"
+            case .networkConnectionLost, .notConnectedToInternet:
+                return "翻译失败：网络中断"
+            default:
+                return "翻译失败：网络异常"
+            }
+        }
+        if let translationError = error as? TranslationError {
+            switch translationError {
+            case .llmHTTPError(let statusCode, _) where statusCode >= 500:
+                return "翻译失败：服务异常"
+            case .llmHTTPError(let statusCode, _) where statusCode == 401 || statusCode == 403:
+                return "翻译失败：API 鉴权"
+            case .llmHTTPError(let statusCode, _) where statusCode == 429:
+                return "翻译失败：请求过多"
+            case .invalidLLMResponse, .llmResponseCountMismatch:
+                return "翻译失败：返回无效"
+            case .llmNotConfigured:
+                return "翻译失败：API 未配置"
+            case .invalidLLMEndpoint:
+                return "翻译失败：地址无效"
+            default:
+                break
+            }
+        }
+        return "翻译失败"
     }
 
     // MARK: - UI 桥接

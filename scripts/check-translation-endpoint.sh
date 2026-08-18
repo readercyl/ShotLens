@@ -18,6 +18,6 @@ swiftc \
 
 "$TEST_BINARY"
 
-rg -n 'request\.timeoutInterval = 12' "$ROOT_DIR/ShotLens/Core/LLMTranslator.swift" >/dev/null
+rg -n 'request\.timeoutInterval = 30' "$ROOT_DIR/ShotLens/Core/LLMTranslator.swift" >/dev/null
 rg -n 'payload\["thinking"\] = \["type": "disabled"\]' "$ROOT_DIR/ShotLens/Core/LLMTranslator.swift" >/dev/null
 rg -n 'parseIndexedLineSlots' "$ROOT_DIR/ShotLens/Core/LLMTranslator.swift" >/dev/null

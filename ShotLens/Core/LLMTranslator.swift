@@ -261,7 +261,7 @@ struct LLMTranslator: TranslationProvider {
         if usesXiaomiMiMo {
             request.setValue(settings.effectiveAPIKey, forHTTPHeaderField: "api-key")
         }
-        request.timeoutInterval = 12
+        request.timeoutInterval = 30
         var payload: [String: Any] = [
             "temperature": 0,
             "messages": [

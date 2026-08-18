@@ -52,10 +52,8 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     ]
 
     private var resultWindow: OverlayResultWindow?
-    private var toolbarWindow: OverlayToolbarWindow?
     private var statusWindow: OverlayStatusWindow?
     private var saveWindow: OverlaySaveWindow?
-    private var pinWindow: OverlayPinWindow?
     private var backdropWindows: [OverlayBackdropWindow] = []
     private var contentView: OverlayContentView?
     private var outsideClickMonitor: Any?
@@ -103,42 +101,19 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         let contentView = OverlayContentView(frame: NSRect(origin: .zero, size: windowRect.size))
         contentView.screenshot = croppedScreenshot
         contentView.displayScale = scale
+        contentView.onTogglePin = { [weak self] in self?.togglePinned() }
         window.contentView = contentView
 
-        let toolbarWindow = OverlayToolbarWindow(anchorRect: windowRect)
-        toolbarWindow.onToggleMode = { [weak self] in
-            Task { @MainActor in self?.toggleOriginalAndTranslation() }
-        }
-        toolbarWindow.onCopyText = { [weak self] in
-            Task { @MainActor in self?.copyTranslatedTextToClipboard() }
-        }
-        toolbarWindow.onCopyImage = { [weak self] in
-            Task { @MainActor in self?.copyCurrentSnapshotToClipboard() }
-        }
-        toolbarWindow.onRetranslate = { [weak self] in
-            Task { @MainActor in self?.beginRetranslation() }
-        }
-        toolbarWindow.onRetry = { [weak self] in self?.onRetry?() }
-        toolbarWindow.setProcessing("正在识别")
-
-        let pinWindow = OverlayPinWindow(anchorRect: windowRect)
-        pinWindow.setScreenshot(croppedScreenshot)
-        pinWindow.onTogglePin = { [weak self] in self?.togglePinned() }
+        let statusWindow = OverlayStatusWindow(anchorRect: windowRect)
+        statusWindow.setMessage("正在识别")
 
         self.resultWindow = window
-        self.toolbarWindow = toolbarWindow
-        self.pinWindow = pinWindow
+        self.statusWindow = statusWindow
         self.contentView = contentView
-
-        // 控件保持独立窗口，便于 pin 单独命中和隐藏；挂到结果窗后由 AppKit
-        // 在同一移动事务中同步跟随，避免 windowDidMove 逐个 setFrame 造成滞后。
-        window.addChildWindow(toolbarWindow, ordered: .above)
-        window.addChildWindow(pinWindow, ordered: .above)
 
         backdropWindows.forEach { $0.orderFrontRegardless() }
         window.orderFrontRegardless()
-        toolbarWindow.orderFrontRegardless()
-        pinWindow.orderFrontRegardless()
+        statusWindow.orderFrontRegardless()
     }
 
     @MainActor
@@ -147,7 +122,8 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         isShowingTranslation = true
         contentView?.setTranslatedBlocks([])
         contentView?.setDisplayMode(.translation)
-        toolbarWindow?.setProcessing(message.shortStatusText)
+        statusWindow?.setMessage(message.shortStatusText)
+        closeSaveWindow()
         applyControlVisibility()
     }
 
@@ -159,11 +135,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         translationStatusMessage = isPartial ? "部分完成" : "翻译完成"
         contentView?.setTranslatedBlocks(blocks)
         contentView?.setDisplayMode(.translation)
-        toolbarWindow?.setSuccess(
-            showingTranslation: isShowingTranslation,
-            message: translationStatusMessage
-        )
-        applyControlVisibility()
+        setToggleStatus(message: translationStatusMessage)
     }
 
     @MainActor
@@ -177,9 +149,13 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         contentView?.setTranslatedBlocks([])
         contentView?.setDisplayMode(.translation)
         if isFailure {
-            toolbarWindow?.setFailure(message: message)
+            closeSaveWindow()
+            statusWindow?.setFailure(message: message, retryTitle: "重新翻译") { [weak self] in
+                self?.onRetry?()
+            }
         } else {
-            toolbarWindow?.setProcessing(message)
+            statusWindow?.setMessage(message)
+            closeSaveWindow()
         }
         applyControlVisibility()
     }
@@ -222,10 +198,10 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
                 if resultWindow.frame.contains(mouseLocation) {
                     return
                 }
-                if self.toolbarWindow?.frame.contains(mouseLocation) == true {
+                if self.statusWindow?.frame.contains(mouseLocation) == true {
                     return
                 }
-                if self.pinWindow?.frame.contains(mouseLocation) == true {
+                if self.saveWindow?.frame.contains(mouseLocation) == true {
                     return
                 }
                 self.dismissFromOutsideClick()
@@ -248,7 +224,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
 
     private func togglePinned() {
         isPinned.toggle()
-        pinWindow?.setPinned(isPinned)
+        contentView?.setPinned(isPinned)
         applyControlVisibility()
     }
 
@@ -261,17 +237,9 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        if let resultWindow {
-            if let toolbarWindow { resultWindow.removeChildWindow(toolbarWindow) }
-            if let pinWindow { resultWindow.removeChildWindow(pinWindow) }
-        }
         resultWindow = nil
-        toolbarWindow?.close()
-        toolbarWindow = nil
         statusWindow?.close()
         statusWindow = nil
-        pinWindow?.close()
-        pinWindow = nil
         saveWindow?.close()
         saveWindow = nil
         contentView = nil
@@ -305,7 +273,11 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     }
 
     func windowDidMove(_ notification: Notification) {
-        // 工具条和 pin 已作为 child window 由 AppKit 同步移动。
+        guard let resultWindow else { return }
+        statusWindow?.updateAnchorRect(resultWindow.frame)
+        if let statusWindow {
+            saveWindow?.updateStatusFrame(statusWindow.frame)
+        }
     }
 
     @MainActor
@@ -313,10 +285,10 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         isShowingTranslation.toggle()
         if isShowingTranslation {
             contentView?.setDisplayMode(.translation)
-            toolbarWindow?.setSuccess(showingTranslation: true, message: translationStatusMessage)
+            setToggleStatus(message: translationStatusMessage)
         } else {
             contentView?.setDisplayMode(.original)
-            toolbarWindow?.setSuccess(showingTranslation: false, message: "显示原文")
+            setToggleStatus(message: "显示原文")
         }
     }
 
@@ -338,22 +310,32 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
             .map(\.translatedText)
             .joined(separator: "\n")
         ClipboardManager().copyTextToClipboard(text)
-        toolbarWindow?.showFeedback("已复制")
+        setToggleStatus(message: "已复制译文")
     }
 
     @MainActor
     private func setToggleStatus(message: String) {
-        toolbarWindow?.setSuccess(showingTranslation: isShowingTranslation, message: message)
+        statusWindow?.setToggle(
+            message: message,
+            toggleTitle: isShowingTranslation ? "显示原文" : "显示翻译",
+            onToggle: { [weak self] in self?.toggleOriginalAndTranslation() }
+        )
+        showSaveWindow()
         applyControlVisibility()
     }
 
     private func applyControlVisibility() {
-        if isPinned {
-            toolbarWindow?.orderOut(nil)
+        let visibility = OverlayControlVisibility.resolve(phase: controlPhase, pinned: isPinned)
+        if visibility.statusVisible {
+            statusWindow?.orderFrontRegardless()
         } else {
-            toolbarWindow?.orderFrontRegardless()
+            statusWindow?.orderOut(nil)
         }
-        pinWindow?.orderFrontRegardless()
+        if visibility.actionsVisible {
+            saveWindow?.orderFrontRegardless()
+        } else {
+            saveWindow?.orderOut(nil)
+        }
     }
 
     @MainActor
@@ -1267,12 +1249,17 @@ private final class OverlayBackdropView: NSView {
 }
 
 final class OverlayContentView: NSView {
+    var onTogglePin: (() -> Void)?
     var screenshot: CGImage? {
-        didSet { needsDisplay = true }
+        didSet {
+            updatePinContrast()
+            needsDisplay = true
+        }
     }
     var displayScale: CGFloat = 1.0
     var translatedBlocks: [TranslatedBlock] = []
     private var displayMode: OverlayDisplayMode = .translation
+    private let pinButton = OverlayPinButton(frame: CGRect(x: 0, y: 0, width: 24, height: 24))
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -1292,6 +1279,10 @@ final class OverlayContentView: NSView {
         needsDisplay = true
     }
 
+    func setPinned(_ pinned: Bool) {
+        pinButton.isPinned = pinned
+    }
+
     fileprivate func setDisplayMode(_ mode: OverlayDisplayMode) {
         displayMode = mode
         needsDisplay = true
@@ -1300,10 +1291,30 @@ final class OverlayContentView: NSView {
     private func setupControls() {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+        pinButton.toolTip = "钉住浮框"
+        pinButton.onClick = { [weak self] in self?.onTogglePin?() }
+        addSubview(pinButton)
     }
 
     override func layout() {
         super.layout()
+        pinButton.frame = CGRect(x: max(4, bounds.maxX - 28), y: 4, width: 24, height: 24)
+        updatePinContrast()
+    }
+
+    private func updatePinContrast() {
+        guard let screenshot, bounds.width > 0, bounds.height > 0 else { return }
+        let scaleX = CGFloat(screenshot.width) / bounds.width
+        let scaleY = CGFloat(screenshot.height) / bounds.height
+        let sampleRect = CGRect(
+            x: max(0, CGFloat(screenshot.width) - 28 * scaleX),
+            y: max(0, 4 * scaleY),
+            width: min(CGFloat(screenshot.width), 24 * scaleX),
+            height: min(CGFloat(screenshot.height), 24 * scaleY)
+        ).integral
+        pinButton.symbolColor = OverlayPinAppearance.usesDarkSymbol(
+            backgroundLuminance: screenshot.averageLuminance(in: sampleRect)
+        ) ? .black : .white
     }
 
     override func draw(_ dirtyRect: NSRect) {
