@@ -435,10 +435,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         ShotLensLogger.log("原始框选截图已保存到剪贴板")
 
-        let displayScale = max(
-            CGFloat(captured.image.width) / max(selection.width, 1),
-            CGFloat(captured.image.height) / max(selection.height, 1),
-            1.0
+        let displayScale = SelectionGeometry.displayScale(
+            forPixelSize: CGSize(width: captured.image.width, height: captured.image.height),
+            captureRect: captureSelection
         )
 
         await showInteractiveOverlay(

@@ -76,7 +76,7 @@ ShotLens 启动后会检查一次 GitHub Release。App 位于系统或用户“�
 bash scripts/build-local.sh
 ```
 
-脚本默认会构建 `ShotLens.app` 到 `build/local`。如需部署到其他目录，可设置 `SHOTLENS_DEPLOY_DIR`。
+脚本默认会使用固定的本地签名证书构建 `ShotLens.app` 到 `build/local`，保持屏幕录制权限连续。如需部署到其他目录，可设置 `SHOTLENS_DEPLOY_DIR`；只有明确需要 ad-hoc 签名时才传入 `SHOTLENS_CODESIGN_IDENTITY=-`。
 
 打包 DMG：
 

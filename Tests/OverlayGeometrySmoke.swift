@@ -7,6 +7,7 @@ struct OverlayGeometrySmoke {
         try assertTinySelectionKeepsCapturedAspectRatio()
         try assertSmallSelectionGetsOCRContext()
         try assertBoundaryTextCanBeIncludedOnlyWhenItBelongsToSelection()
+        try assertExpandedCaptureUsesItsOwnDisplayScale()
         try assertPixelRectKeepsExactTopLeftAnchor()
         try assertTextRemovalPreservesBackgroundVariation()
         try assertTextRemovalSurvivesImperfectForegroundEstimate()
@@ -165,6 +166,25 @@ struct OverlayGeometrySmoke {
             in: selection
         ) else {
             throw TestFailure("A neighboring word outside the selection must be excluded")
+        }
+    }
+
+    private static func assertExpandedCaptureUsesItsOwnDisplayScale() throws {
+        let originalSelection = CGRect(x: 100, y: 120, width: 80, height: 30)
+        let captureRect = originalSelection.insetBy(dx: -12, dy: -12)
+        let pixelSize = CGSize(width: captureRect.width * 2, height: captureRect.height * 2)
+        let displayScale = SelectionGeometry.displayScale(
+            forPixelSize: pixelSize,
+            captureRect: captureRect
+        )
+        let frame = OverlayGeometry.resultFrame(
+            screenshotPixelSize: pixelSize,
+            screenPosition: captureRect.origin,
+            displayScale: displayScale
+        )
+        guard abs(frame.width - captureRect.width) < 0.01,
+              abs(frame.height - captureRect.height) < 0.01 else {
+            throw TestFailure("Expanded capture must keep its own display size; got \(frame.size)")
         }
     }
 

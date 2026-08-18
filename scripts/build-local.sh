@@ -19,6 +19,11 @@ DEPLOY_DIR="${SHOTLENS_DEPLOY_DIR:-$BUILD_DIR}"
 DEPLOY_APP_DIR="$DEPLOY_DIR/$APP_NAME.app"
 CODESIGN_IDENTITY="${SHOTLENS_CODESIGN_IDENTITY:-}"
 
+# 本地候选默认使用固定证书，避免每次构建都变成 ad-hoc 签名并重置屏幕录制权限。
+if [[ -z "$CODESIGN_IDENTITY" ]]; then
+  CODESIGN_IDENTITY="$("$ROOT_DIR/scripts/ensure-local-signing-cert.sh")"
+fi
+
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 

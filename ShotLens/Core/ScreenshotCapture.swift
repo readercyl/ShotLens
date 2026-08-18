@@ -224,6 +224,16 @@ enum SelectionGeometry {
         let centerInside = userSelection.insetBy(dx: -max(2, candidate.height * 0.35), dy: -max(2, candidate.height * 0.35)).contains(candidate.mid)
         return overlapRatio >= 0.18 || centerInside
     }
+
+    /// 用于显示的截图已经按 captureRect 裁剪；显示比例必须基于该范围计算，
+    /// 不能混用用户原始框选范围，否则扩展后的截图会被错误缩小。
+    static func displayScale(forPixelSize pixelSize: CGSize, captureRect: CGRect) -> CGFloat {
+        max(
+            pixelSize.width / max(captureRect.width, 1),
+            pixelSize.height / max(captureRect.height, 1),
+            1.0
+        )
+    }
 }
 
 private extension CGRect {
