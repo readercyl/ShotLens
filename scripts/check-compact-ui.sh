@@ -66,7 +66,7 @@ rg -n 'onRetranslate' "$OVERLAY_WINDOW" "$SHOTLENS_APP" >/dev/null
 rg -n 'overlay\.onRetranslate = overlay\.onRetry' "$SHOTLENS_APP" >/dev/null
 RETRY_BLOCK="$(sed -n '/overlay\.onRetry =/,/overlay\.onRetranslate =/p' "$SHOTLENS_APP")"
 grep -F 'await self.translate(' <<<"$RETRY_BLOCK" >/dev/null
-grep -F 'captured: captured' <<<"$RETRY_BLOCK" >/dev/null
+grep -F 'captured: ocrCapture' <<<"$RETRY_BLOCK" >/dev/null
 if grep -E 'captureFrozenDisplay|executeTranslationFlow|startCapture' <<<"$RETRY_BLOCK" >/dev/null; then
   echo "Retranslate must re-run OCR from the existing captured image without taking a new screenshot." >&2
   exit 1

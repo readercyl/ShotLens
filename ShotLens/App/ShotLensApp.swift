@@ -402,9 +402,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for: selection,
             within: frozenSnapshot.screenRect
         )
-        let captured: CapturedScreenshot?
+        let ocrCapture: CapturedScreenshot?
         do {
-            captured = try capture.crop(
+            ocrCapture = try capture.crop(
                 frozenSnapshot: frozenSnapshot,
                 selection: captureSelection,
                 userSelection: selection
@@ -414,35 +414,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        guard let captured else {
+        guard let ocrCapture else {
             ShotLensLogger.log("冻结截图裁剪为空")
             return
         }
 
-        let clipboardCapture: CapturedScreenshot?
+        let displayCapture: CapturedScreenshot?
         do {
-            clipboardCapture = try capture.crop(
+            displayCapture = try capture.crop(
                 frozenSnapshot: frozenSnapshot,
                 selection: selection
             )
         } catch {
-            clipboardCapture = nil
-            ShotLensLogger.log("原始框选截图裁剪失败，使用 OCR 截图写入剪贴板", error: error)
+            displayCapture = nil
+            ShotLensLogger.log("原始框选截图裁剪失败", error: error)
         }
-        let clipboardImage = clipboardCapture?.image ?? captured.image
+        guard let displayCapture else {
+            ShotLensLogger.log("原始框选截图裁剪为空")
+            return
+        }
         await MainActor.run {
-            ClipboardManager().copyImageToClipboard(image: clipboardImage)
+            ClipboardManager().copyImageToClipboard(image: displayCapture.image)
         }
         ShotLensLogger.log("原始框选截图已保存到剪贴板")
 
         let displayScale = SelectionGeometry.displayScale(
-            forPixelSize: CGSize(width: captured.image.width, height: captured.image.height),
-            captureRect: captureSelection
+            forPixelSize: CGSize(width: displayCapture.image.width, height: displayCapture.image.height),
+            captureRect: selection
         )
 
         await showInteractiveOverlay(
-            captured: captured,
-            selection: captureSelection,
+            ocrCapture: ocrCapture,
+            displayImage: displayCapture.image,
+            selection: selection,
             displayScale: displayScale,
             translationSettings: translationSettings
         )
@@ -456,7 +460,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func translate(
         captured: CapturedScreenshot,
-        displayScale: CGFloat,
         overlay: OverlayWindow?,
         settings: TranslationSettings
     ) async {
@@ -575,7 +578,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     private func showInteractiveOverlay(
-        captured: CapturedScreenshot,
+        ocrCapture: CapturedScreenshot,
+        displayImage: CGImage,
         selection: CGRect,
         displayScale: CGFloat,
         translationSettings: TranslationSettings
@@ -592,8 +596,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ShotLensLogger.log("用户点击重试翻译")
                 Task {
                     await self.translate(
-                        captured: captured,
-                        displayScale: displayScale,
+                        captured: ocrCapture,
                         overlay: overlay,
                         settings: translationSettings
                     )
@@ -601,7 +604,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             overlay.onRetranslate = overlay.onRetry
             overlay.show(
-                croppedScreenshot: captured.image,
+                croppedScreenshot: displayImage,
                 at: selection.origin,
                 displayScale: displayScale
             )
@@ -609,8 +612,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { [weak self, weak overlay] in
                 guard let self else { return }
                 await self.translate(
-                    captured: captured,
-                    displayScale: displayScale,
+                    captured: ocrCapture,
                     overlay: overlay,
                     settings: translationSettings
                 )

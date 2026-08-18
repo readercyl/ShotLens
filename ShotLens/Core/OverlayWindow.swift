@@ -1121,7 +1121,7 @@ private final class OverlayPinButton: NSControl {
 
     override func draw(_ dirtyRect: NSRect) {
         let image = NSImage(systemSymbolName: isPinned ? "pin.fill" : "pin", accessibilityDescription: isPinned ? "解除钉住" : "钉住")
-        let symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+        let symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
             .applying(.init(paletteColors: [usesDarkSymbol ? .black : .white]))
         guard let configuredImage = image?.withSymbolConfiguration(symbolConfiguration) else { return }
         NSGraphicsContext.saveGraphicsState()
@@ -1130,7 +1130,21 @@ private final class OverlayPinButton: NSControl {
         transform.rotate(byDegrees: OverlayPinAppearance.symbolRotationDegrees(isPinned: isPinned))
         transform.translateX(by: -bounds.midX, yBy: -bounds.midY)
         transform.concat()
-        configuredImage.draw(in: bounds.insetBy(dx: 5, dy: 5))
+        let imageSize = configuredImage.size
+        let imageRect = CGRect(
+            x: floor((bounds.width - imageSize.width) / 2),
+            y: floor((bounds.height - imageSize.height) / 2),
+            width: imageSize.width,
+            height: imageSize.height
+        )
+        configuredImage.draw(
+            in: imageRect,
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1,
+            respectFlipped: true,
+            hints: nil
+        )
         NSGraphicsContext.restoreGraphicsState()
     }
 
