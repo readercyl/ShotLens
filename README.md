@@ -158,7 +158,7 @@ SHOTLENS_APP_VERSION=v0.8.7 bash scripts/release-github.sh
 
 ShotLens 会在本机完成截图、框选、OCR 和译文覆盖渲染。截图像素仅用于本地 OCR 和覆盖渲染；OCR 识别出的文字会发送给默认或你配置的 API 服务商进行翻译。
 
-请不要把个人 API 密钥写入源码、脚本或发行版说明。发布前建议运行 `scripts/check-no-private-config.sh` 检查构建产物；脚本只允许这枚明确声明的公共默认 Key。
+请不要把个人 API 密钥写入源码、脚本或发行版说明。发布前建议运行 `scripts/check-no-private-config.sh` 检查源码和构建产物，确保没有任何 API Key 泄露。
 
 ## 仓库说明
 
