@@ -234,6 +234,39 @@ enum SelectionGeometry {
             1.0
         )
     }
+
+    static func mapOCRBlockToDisplay(
+        _ block: TextBlock,
+        userSelectionRectInOCR: CGRect,
+        displayPixelSize: CGSize
+    ) -> TextBlock? {
+        guard userSelectionRectInOCR.width > 0,
+              userSelectionRectInOCR.height > 0,
+              displayPixelSize.width > 0,
+              displayPixelSize.height > 0 else {
+            return nil
+        }
+
+        let scaleX = displayPixelSize.width / userSelectionRectInOCR.width
+        let scaleY = displayPixelSize.height / userSelectionRectInOCR.height
+        let displayBounds = CGRect(origin: .zero, size: displayPixelSize)
+        let mappedRect = CGRect(
+            x: (block.boundingBox.minX - userSelectionRectInOCR.minX) * scaleX,
+            y: (block.boundingBox.minY - userSelectionRectInOCR.minY) * scaleY,
+            width: block.boundingBox.width * scaleX,
+            height: block.boundingBox.height * scaleY
+        ).intersection(displayBounds)
+        guard !mappedRect.isNull, mappedRect.width >= 1, mappedRect.height >= 1 else {
+            return nil
+        }
+
+        return TextBlock(
+            text: block.text,
+            boundingBox: mappedRect,
+            detectedLanguage: block.detectedLanguage,
+            visualStyle: block.visualStyle
+        )
+    }
 }
 
 private extension CGRect {

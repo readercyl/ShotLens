@@ -8,6 +8,7 @@ struct OverlayGeometrySmoke {
         try assertSmallSelectionGetsOCRContext()
         try assertBoundaryTextCanBeIncludedOnlyWhenItBelongsToSelection()
         try assertExpandedCaptureUsesItsOwnDisplayScale()
+        try assertOCRCoordinatesMapBackToDisplaySelection()
         try assertPixelRectKeepsExactTopLeftAnchor()
         try assertTextRemovalPreservesBackgroundVariation()
         try assertTextRemovalSurvivesImperfectForegroundEstimate()
@@ -185,6 +186,22 @@ struct OverlayGeometrySmoke {
         guard abs(frame.width - captureRect.width) < 0.01,
               abs(frame.height - captureRect.height) < 0.01 else {
             throw TestFailure("Expanded capture must keep its own display size; got \(frame.size)")
+        }
+    }
+
+    private static func assertOCRCoordinatesMapBackToDisplaySelection() throws {
+        let block = TextBlock(
+            text: "English",
+            boundingBox: CGRect(x: 32, y: 24, width: 40, height: 12),
+            detectedLanguage: "en"
+        )
+        let mapped = SelectionGeometry.mapOCRBlockToDisplay(
+            block,
+            userSelectionRectInOCR: CGRect(x: 20, y: 16, width: 120, height: 60),
+            displayPixelSize: CGSize(width: 120, height: 60)
+        )
+        guard mapped?.boundingBox == CGRect(x: 12, y: 8, width: 40, height: 12) else {
+            throw TestFailure("OCR coordinates were not mapped back to the original selection: \(String(describing: mapped?.boundingBox))")
         }
     }
 

@@ -10,6 +10,7 @@ mkdir -p "$BUILD_DIR"
 swiftc \
   -parse-as-library \
   "$ROOT_DIR/ShotLens/Core/ShotLensLogger.swift" \
+  "$ROOT_DIR/ShotLens/Models/TranslationResult.swift" \
   "$ROOT_DIR/ShotLens/Core/ScreenshotCapture.swift" \
   "$ROOT_DIR/Tests/MultiDisplayCaptureSmoke.swift" \
   -o "$TEST_BINARY"

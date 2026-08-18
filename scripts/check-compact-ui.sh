@@ -51,6 +51,8 @@ if rg -n 'checkUpdateIconView|arrow.clockwise|CABasicAnimation|shotlens.update.s
   exit 1
 fi
 rg -n 'OverlayPinButton' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'OverlayToolbarWindow' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'OverlayToolbarView' "$OVERLAY_WINDOW" >/dev/null
 if rg -n 'NSColor\.system(?:Blue|Green|Orange).*setFill' "$OVERLAY_WINDOW" >/dev/null; then
   echo "Overlay action buttons must use one neutral color." >&2
   exit 1

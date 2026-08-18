@@ -460,6 +460,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func translate(
         captured: CapturedScreenshot,
+        displayPixelSize: CGSize,
         overlay: OverlayWindow?,
         settings: TranslationSettings
     ) async {
@@ -485,9 +486,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlay?.setMessage("未识别到文字")
             return
         }
-        ShotLensLogger.log(String(format: "OCR 完成，识别 %d 个文本块，选区内 %d 个，耗时 %.2fs", textBlocks.count, selectedTextBlocks.count, Date().timeIntervalSince(ocrStartedAt)))
-        let semanticBlocks = SemanticTextGrouper.merge(selectedTextBlocks)
-        ShotLensLogger.log("语义分组完成，\(selectedTextBlocks.count) 个 OCR 行合并为 \(semanticBlocks.count) 个文本块")
+        let displayTextBlocks = selectedTextBlocks.compactMap {
+            SelectionGeometry.mapOCRBlockToDisplay(
+                $0,
+                userSelectionRectInOCR: captured.userSelectionRectInImage,
+                displayPixelSize: displayPixelSize
+            )
+        }
+        ShotLensLogger.log(String(format: "OCR 完成，识别 %d 个文本块，选区内 %d 个，显示坐标 %d 个，耗时 %.2fs", textBlocks.count, selectedTextBlocks.count, displayTextBlocks.count, Date().timeIntervalSince(ocrStartedAt)))
+        let semanticBlocks = SemanticTextGrouper.merge(displayTextBlocks)
+        ShotLensLogger.log("语义分组完成，\(displayTextBlocks.count) 个 OCR 行合并为 \(semanticBlocks.count) 个文本块")
         let contentPlan = TranslationContentPlan.make(from: semanticBlocks)
         guard !contentPlan.sourceTexts.isEmpty else {
             ShotLensLogger.log("选区内没有需要翻译的英文")
@@ -597,6 +605,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Task {
                     await self.translate(
                         captured: ocrCapture,
+                        displayPixelSize: CGSize(width: displayImage.width, height: displayImage.height),
                         overlay: overlay,
                         settings: translationSettings
                     )
@@ -613,6 +622,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 await self.translate(
                     captured: ocrCapture,
+                    displayPixelSize: CGSize(width: displayImage.width, height: displayImage.height),
                     overlay: overlay,
                     settings: translationSettings
                 )
