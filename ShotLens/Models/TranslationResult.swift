@@ -48,7 +48,12 @@ struct TextBlockVisualStyle: Codable, Equatable {
     }
 }
 
-/// OCR 识别出的单个文本块
+struct TextRun: Equatable {
+    let text: String
+    let boundingBox: CGRect
+}
+
+/// OCR 识别出的单个文本行或语义块
 struct TextBlock {
     /// 识别出的原文
     let text: String
@@ -58,17 +63,21 @@ struct TextBlock {
     let detectedLanguage: String
     /// OCR 估算出的视觉特征
     let visualStyle: TextBlockVisualStyle
+    /// 行内可翻译的英文子范围；中文和数字仅作为受保护的语义上下文。
+    let englishRuns: [TextRun]
 
     init(
         text: String,
         boundingBox: CGRect,
         detectedLanguage: String,
-        visualStyle: TextBlockVisualStyle = .unknown
+        visualStyle: TextBlockVisualStyle = .unknown,
+        englishRuns: [TextRun] = []
     ) {
         self.text = text
         self.boundingBox = boundingBox
         self.detectedLanguage = detectedLanguage
         self.visualStyle = visualStyle
+        self.englishRuns = englishRuns
     }
 }
 

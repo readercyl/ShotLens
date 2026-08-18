@@ -107,14 +107,25 @@ private struct OCRBlockDTO: Decodable {
     let boundingBox: OCRRectDTO
     let detectedLanguage: String
     let visualStyle: TextBlockVisualStyle?
+    let englishRuns: [OCRRunDTO]?
 
     var textBlock: TextBlock {
         TextBlock(
             text: text.normalizedOCRText,
             boundingBox: boundingBox.cgRect,
             detectedLanguage: detectedLanguage,
-            visualStyle: visualStyle ?? .unknown
+            visualStyle: visualStyle ?? .unknown,
+            englishRuns: (englishRuns ?? []).map(\.textRun)
         )
+    }
+}
+
+private struct OCRRunDTO: Decodable {
+    let text: String
+    let boundingBox: OCRRectDTO
+
+    var textRun: TextRun {
+        TextRun(text: text, boundingBox: boundingBox.cgRect)
     }
 }
 

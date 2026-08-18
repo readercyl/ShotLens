@@ -96,6 +96,7 @@ struct TranslationEndpointSmoke {
         try await assertNestedArrayDoesNotDiscardTranslations()
         try await assertIncompleteJSONObjectKeepsIndexedTranslations()
         try await assertExistingChineseMustBePreserved()
+        try await assertExistingNumbersMustBePreserved()
         try await assertProductIdentifierMayRemainUntranslated()
         try await assertPunctuatedIndexedJSONStaysSingleRequest()
         try await assertUntranslatedSentenceFailsWithoutSecondRequest()
@@ -474,7 +475,7 @@ struct TranslationEndpointSmoke {
 
     private static func assertExactBatchUsesSessionCache() async throws {
         MockOpenAIProtocol.reset()
-        MockOpenAIProtocol.assistantContent = #"{"translations":["唯一缓存探针句子"]}"#
+        MockOpenAIProtocol.assistantContent = #"{"translations":["唯一缓存探针句子 7319"]}"#
         let translator = LLMTranslator(settings: TranslationSettings(
             apiEndpoint: "https://shotlens-test.local/v1",
             apiKey: "test-key",
@@ -484,7 +485,7 @@ struct TranslationEndpointSmoke {
 
         let first = try await translator.translate(input, from: "en", to: "zh-Hans")
         let second = try await translator.translate(input, from: "en", to: "zh-Hans")
-        guard first == ["唯一缓存探针句子"], second == first else {
+        guard first == ["唯一缓存探针句子 7319"], second == first else {
             throw TestFailure("Expected an exact cached translation result")
         }
         guard MockOpenAIProtocol.requestBodies.count == 1 else {
@@ -768,6 +769,26 @@ struct TranslationEndpointSmoke {
         } catch {
             guard MockOpenAIProtocol.requestBodies.count == 1 else {
                 throw TestFailure("Chinese-preservation failure must not trigger another request")
+            }
+        }
+    }
+
+    private static func assertExistingNumbersMustBePreserved() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContent = "0\t节省费用并立即开始"
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+        do {
+            _ = try await translator.translate(["Save 30% and start with $15"], from: "en", to: "zh-Hans")
+            throw TestFailure("Expected altered numeric source text to be rejected")
+        } catch is TestFailure {
+            throw TestFailure("Expected altered numeric source text to be rejected")
+        } catch {
+            guard MockOpenAIProtocol.requestBodies.count == 1 else {
+                throw TestFailure("Number-preservation failure must not trigger another request")
             }
         }
     }

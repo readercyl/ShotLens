@@ -10,7 +10,8 @@ enum SemanticTextGrouper {
                 text: text,
                 boundingBox: block.boundingBox,
                 detectedLanguage: block.detectedLanguage,
-                visualStyle: block.visualStyle
+                visualStyle: block.visualStyle,
+                englishRuns: block.englishRuns
             )
         }
         let rows = makeRows(from: readable)
@@ -62,7 +63,8 @@ private struct TextRow {
             text: ordered.map(\.text).joined(separator: " "),
             boundingBox: boundingBox,
             detectedLanguage: ordered.contains(where: { $0.detectedLanguage == "mixed" }) ? "mixed" : "en",
-            visualStyle: ordered.first(where: { $0.visualStyle.hasReliableSignal })?.visualStyle ?? .unknown
+            visualStyle: ordered.first(where: { $0.visualStyle.hasReliableSignal })?.visualStyle ?? .unknown,
+            englishRuns: ordered.flatMap(\.englishRuns)
         )
     }
 
@@ -106,7 +108,8 @@ private struct FlowGroup {
             text: blocks.map(\.text).joined(separator: " "),
             boundingBox: boundingBox,
             detectedLanguage: blocks.contains(where: { $0.detectedLanguage == "mixed" }) ? "mixed" : "en",
-            visualStyle: blocks.first(where: { $0.visualStyle.hasReliableSignal })?.visualStyle ?? .unknown
+            visualStyle: blocks.first(where: { $0.visualStyle.hasReliableSignal })?.visualStyle ?? .unknown,
+            englishRuns: blocks.flatMap(\.englishRuns)
         )
     }
 
@@ -152,7 +155,8 @@ private struct FlowGroup {
     }
 }
 
-/// OCR 已在本地拆出英文片段；每个视觉语义块只产生一个英文翻译项。
+/// 根据语义密度决定局部替换还是整块重排：孤立英文尽量原位替换，
+/// 英文占主体且只夹少量中文或数字时保留受保护内容后整块重排。
 struct TranslationContentPlan {
     private struct BlockPlan {
         let original: TextBlock
@@ -166,11 +170,84 @@ struct TranslationContentPlan {
         var sourceTexts: [String] = []
         var blockPlans: [BlockPlan] = []
         for block in blocks where block.text.containsLatinLetter {
-            let index = sourceTexts.count
-            sourceTexts.append(block.text.trimmingCharacters(in: .whitespacesAndNewlines))
-            blockPlans.append(BlockPlan(original: block, translationIndex: index))
+            let source = block.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let localizedBlocks = localizedEnglishBlocks(from: block)
+
+            if shouldReflowSemanticBlock(source: source, englishRunCount: block.englishRuns.count)
+                || localizedBlocks.isEmpty {
+                let index = sourceTexts.count
+                sourceTexts.append(source)
+                blockPlans.append(BlockPlan(original: block, translationIndex: index))
+                continue
+            }
+
+            for localizedBlock in localizedBlocks {
+                let index = sourceTexts.count
+                sourceTexts.append(localizedBlock.text)
+                blockPlans.append(BlockPlan(original: localizedBlock, translationIndex: index))
+            }
         }
         return TranslationContentPlan(sourceTexts: sourceTexts, blockPlans: blockPlans)
+    }
+
+    private static func shouldReflowSemanticBlock(source: String, englishRunCount: Int) -> Bool {
+        let latinCount = source.latinLetterCount
+        let hanCount = source.hanCharacterCount
+        let digitCount = source.digitCount
+        let protectedCount = hanCount + digitCount
+        let semanticCount = max(1, latinCount + protectedCount)
+        let protectedRatio = Double(protectedCount) / Double(semanticCount)
+        let sentenceLike = englishRunCount > 3
+            || source.contains(where: { ".!?。！？".contains($0) })
+
+        if protectedCount > 0 {
+            return protectedRatio <= 0.35
+        }
+        return sentenceLike || englishRunCount > 3
+    }
+
+    private static func localizedEnglishBlocks(from block: TextBlock) -> [TextBlock] {
+        let runs = block.englishRuns.sorted {
+            let tolerance = max(4, min($0.boundingBox.height, $1.boundingBox.height) * 0.35)
+            if abs($0.boundingBox.midY - $1.boundingBox.midY) > tolerance {
+                return $0.boundingBox.minY < $1.boundingBox.minY
+            }
+            return $0.boundingBox.minX < $1.boundingBox.minX
+        }
+        guard !runs.isEmpty else { return [] }
+
+        var groups: [[TextRun]] = []
+        for run in runs {
+            if let lastGroup = groups.last,
+               let previous = lastGroup.last,
+               canJoinLocalizedRuns(previous, run) {
+                groups[groups.count - 1].append(run)
+            } else {
+                groups.append([run])
+            }
+        }
+
+        return groups.map { group in
+            let boundingBox = group.dropFirst().reduce(group[0].boundingBox) {
+                $0.union($1.boundingBox)
+            }
+            return TextBlock(
+                text: group.map(\.text).joined(separator: " "),
+                boundingBox: boundingBox,
+                detectedLanguage: "en",
+                visualStyle: block.visualStyle,
+                englishRuns: group
+            )
+        }
+    }
+
+    private static func canJoinLocalizedRuns(_ lhs: TextRun, _ rhs: TextRun) -> Bool {
+        let minHeight = max(1, min(lhs.boundingBox.height, rhs.boundingBox.height))
+        let verticalDistance = abs(lhs.boundingBox.midY - rhs.boundingBox.midY)
+        let horizontalGap = rhs.boundingBox.minX - lhs.boundingBox.maxX
+        return verticalDistance <= minHeight * 0.4
+            && horizontalGap >= -minHeight * 0.25
+            && horizontalGap <= max(8, minHeight * 0.75)
     }
 
     func applying(_ translations: [String]) -> [TranslatedBlock]? {
@@ -197,6 +274,26 @@ private extension String {
                 || (97...122).contains(Int(scalar.value))
                 || (0x00C0...0x024F).contains(Int(scalar.value))
         }
+    }
+
+    var latinLetterCount: Int {
+        unicodeScalars.filter { scalar in
+            (65...90).contains(Int(scalar.value))
+                || (97...122).contains(Int(scalar.value))
+                || (0x00C0...0x024F).contains(Int(scalar.value))
+        }.count
+    }
+
+    var hanCharacterCount: Int {
+        unicodeScalars.filter { scalar in
+            (0x3400...0x4DBF).contains(Int(scalar.value))
+                || (0x4E00...0x9FFF).contains(Int(scalar.value))
+                || (0xF900...0xFAFF).contains(Int(scalar.value))
+        }.count
+    }
+
+    var digitCount: Int {
+        unicodeScalars.filter { CharacterSet.decimalDigits.contains($0) }.count
     }
 
     var startsWithLowercaseLetter: Bool {

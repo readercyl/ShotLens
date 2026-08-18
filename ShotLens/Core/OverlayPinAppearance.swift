@@ -5,8 +5,8 @@ enum OverlayPinAppearance {
         backgroundLuminance >= 0.55
     }
 
-    /// SF Symbols 的 pin 默认斜向约 45°；未钉住时反向旋转为竖直。
+    /// 通过空心/实心表达钉住状态，不旋转图形，避免非整数像素重采样。
     static func symbolRotationDegrees(isPinned: Bool) -> Double {
-        isPinned ? 0 : -45
+        0
     }
 }

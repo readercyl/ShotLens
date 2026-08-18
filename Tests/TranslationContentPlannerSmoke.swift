@@ -7,6 +7,10 @@ struct TranslationContentPlannerSmoke {
         try assertChineseOnlyIsExcluded()
         try assertMixedTextOnlyKeepsEnglishRuns()
         try assertEnglishOnlyStaysSingleItem()
+        try assertIsolatedEnglishPhraseStaysLocal()
+        try assertLightMixedContentReflowsAsOneSemanticBlock()
+        try assertChineseDominantContentOnlyReplacesEnglishRuns()
+        try assertSeparatedEnglishRunsDoNotCoverProtectedText()
         try assertPartialTranslationsKeepIndependentBlocks()
         try assertWrappedHeadingAndParagraphFormSemanticBlocks()
         try assertColumnsStayIndependent()
@@ -39,6 +43,70 @@ struct TranslationContentPlannerSmoke {
         guard plan.sourceTexts == ["Open settings"],
               plan.applying(["打开设置"])?.map(\.translatedText) == ["打开设置"] else {
             throw TestFailure("English-only block should remain one trimmed semantic item")
+        }
+    }
+
+    private static func assertIsolatedEnglishPhraseStaysLocal() throws {
+        let source = block(
+            "Open settings",
+            width: 140,
+            englishRuns: [
+                run("Open", x: 10, width: 42),
+                run("settings", x: 58, width: 72)
+            ]
+        )
+        let plan = TranslationContentPlan.make(from: [source])
+        let translated = plan.applying(["打开设置"])
+        guard plan.sourceTexts == ["Open settings"],
+              translated?.first?.original.boundingBox == CGRect(x: 10, y: 10, width: 120, height: 24) else {
+            throw TestFailure("Isolated English phrase should stay localized: \(plan.sourceTexts)")
+        }
+    }
+
+    private static func assertLightMixedContentReflowsAsOneSemanticBlock() throws {
+        let sourceText = "AI 模型 recommendations for teams"
+        let source = block(
+            sourceText,
+            width: 360,
+            englishRuns: [
+                run("AI", x: 10, width: 24),
+                run("recommendations", x: 80, width: 130),
+                run("for", x: 218, width: 30),
+                run("teams", x: 256, width: 54)
+            ]
+        )
+        let plan = TranslationContentPlan.make(from: [source])
+        guard plan.sourceTexts == [sourceText],
+              plan.applying(["AI 模型团队推荐方案"])?.first?.original.boundingBox == source.boundingBox else {
+            throw TestFailure("Light mixed content should be semantically reflowed as one block: \(plan.sourceTexts)")
+        }
+    }
+
+    private static func assertChineseDominantContentOnlyReplacesEnglishRuns() throws {
+        let source = block(
+            "请点击 Settings 打开设置页面",
+            width: 300,
+            englishRuns: [run("Settings", x: 88, width: 76)]
+        )
+        let plan = TranslationContentPlan.make(from: [source])
+        guard plan.sourceTexts == ["Settings"],
+              plan.applying(["设置"])?.first?.original.boundingBox == CGRect(x: 88, y: 10, width: 76, height: 24) else {
+            throw TestFailure("Chinese-dominant content should only replace English runs: \(plan.sourceTexts)")
+        }
+    }
+
+    private static func assertSeparatedEnglishRunsDoNotCoverProtectedText() throws {
+        let source = block(
+            "请点击 Open 中文内容 Settings 打开页面",
+            width: 360,
+            englishRuns: [
+                run("Open", x: 70, width: 42),
+                run("Settings", x: 220, width: 76)
+            ]
+        )
+        let plan = TranslationContentPlan.make(from: [source])
+        guard plan.sourceTexts == ["Open", "Settings"] else {
+            throw TestFailure("Separated English runs must remain independent: \(plan.sourceTexts)")
         }
     }
 
@@ -126,13 +194,25 @@ struct TranslationContentPlannerSmoke {
         x: CGFloat = 10,
         y: CGFloat = 10,
         width: CGFloat = 200,
-        height: CGFloat = 24
+        height: CGFloat = 24,
+        englishRuns: [TextRun] = []
     ) -> TextBlock {
         TextBlock(
             text: text,
             boundingBox: CGRect(x: x, y: y, width: width, height: height),
-            detectedLanguage: "und"
+            detectedLanguage: "und",
+            englishRuns: englishRuns
         )
+    }
+
+    private static func run(
+        _ text: String,
+        x: CGFloat,
+        y: CGFloat = 10,
+        width: CGFloat,
+        height: CGFloat = 24
+    ) -> TextRun {
+        TextRun(text: text, boundingBox: CGRect(x: x, y: y, width: width, height: height))
     }
 }
 

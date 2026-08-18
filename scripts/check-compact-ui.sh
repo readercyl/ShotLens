@@ -53,6 +53,18 @@ fi
 rg -n 'OverlayPinButton' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'OverlayToolbarWindow' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'OverlayToolbarView' "$OVERLAY_WINDOW" >/dev/null
+rg -n -F 'OverlayToolbarIconButton(symbolName: "eye", label: "显示原文")' "$OVERLAY_WINDOW" >/dev/null
+rg -n -F 'OverlayToolbarIconButton(symbolName: "doc.on.doc", label: "复制译文")' "$OVERLAY_WINDOW" >/dev/null
+rg -n -F 'OverlayToolbarIconButton(symbolName: "arrow.clockwise", label: "重新翻译")' "$OVERLAY_WINDOW" >/dev/null
+rg -n -F 'OverlayToolbarIconButton(symbolName: "photo.on.rectangle", label: "复制截图")' "$OVERLAY_WINDOW" >/dev/null
+rg -n -F 'toolbarWindow?.orderOut(nil)' "$OVERLAY_WINDOW" >/dev/null
+rg -n -F 'toolTip = label' "$OVERLAY_WINDOW" >/dev/null
+rg -n -F 'isPressed = true' "$OVERLAY_WINDOW" >/dev/null
+rg -n -F 'toolbarWindow?.showFeedback("已复制")' "$OVERLAY_WINDOW" >/dev/null
+if rg -n 'OverlayToolbarIconButton\(symbolName: "ellipsis"' "$OVERLAY_WINDOW" >/dev/null; then
+  echo "All result actions must stay visible; toolbar must not hide them in an ellipsis menu." >&2
+  exit 1
+fi
 if rg -n 'NSColor\.system(?:Blue|Green|Orange).*setFill' "$OVERLAY_WINDOW" >/dev/null; then
   echo "Overlay action buttons must use one neutral color." >&2
   exit 1

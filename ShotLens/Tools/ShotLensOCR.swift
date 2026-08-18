@@ -78,7 +78,7 @@ struct ShotLensOCR {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
-        request.automaticallyDetectsLanguage = false
+        request.automaticallyDetectsLanguage = true
         request.minimumTextHeight = 0.004
         request.recognitionLanguages = ["en-US", "zh-Hans"]
         request.customWords = [
@@ -109,9 +109,9 @@ struct ShotLensOCR {
         }
 
         let imageSize = CGSize(width: sourceImage.width, height: sourceImage.height)
-        return observations.flatMap { observation -> [OCRBlockDTO] in
-            guard let candidate = bestCandidate(from: observation) else { return [] }
-            return textBlocks(
+        return observations.compactMap { observation -> OCRBlockDTO? in
+            guard let candidate = bestCandidate(from: observation) else { return nil }
+            return textBlock(
                 from: candidate,
                 observation: observation,
                 image: sourceImage,
@@ -124,16 +124,22 @@ struct ShotLensOCR {
     private static func bestCandidate(from observation: VNRecognizedTextObservation) -> VNRecognizedText? {
         observation.topCandidates(5)
             .filter { $0.string.hasMeaningfulOCRContent }
-            .max { $0.confidence < $1.confidence }
+            .max { candidateScore($0) < candidateScore($1) }
     }
 
-    private static func textBlocks(
+    private static func candidateScore(_ candidate: VNRecognizedText) -> Float {
+        candidate.confidence
+            + (candidate.string.containsHanCharacter ? 0.12 : 0)
+            + (candidate.string.containsLatinLetter ? 0.03 : 0)
+    }
+
+    private static func textBlock(
         from candidate: VNRecognizedText,
         observation: VNRecognizedTextObservation,
         image: CGImage,
         imageSize: CGSize,
         allowEdgeText: Bool
-    ) -> [OCRBlockDTO] {
+    ) -> OCRBlockDTO? {
         let text = candidate.string
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(
@@ -141,10 +147,20 @@ struct ShotLensOCR {
                 with: "GPT-4o",
                 options: [.regularExpression, .caseInsensitive]
             )
-        guard text.hasMeaningfulOCRContent else { return [] }
+        guard text.hasMeaningfulOCRContent else { return nil }
+
+        let lineBoundingBox = observation.boundingBox
+            .fromVisionNormalized(to: imageSize)
+            .intersection(CGRect(x: 0, y: 0, width: imageSize.width, height: imageSize.height))
+        guard !lineBoundingBox.isNull,
+              lineBoundingBox.width >= 1,
+              lineBoundingBox.height >= 1,
+              allowEdgeText || lineBoundingBox.isSafelyInside(imageSize: imageSize) else {
+            return nil
+        }
 
         let ranges = englishRanges(in: text)
-        return ranges.compactMap { range -> OCRBlockDTO? in
+        let englishRuns = ranges.compactMap { range -> OCRRunDTO? in
             let rawRun = String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
             let run = rawRun
             guard run.containsLatinLetter else { return nil }
@@ -162,21 +178,26 @@ struct ShotLensOCR {
                 .intersection(CGRect(x: 0, y: 0, width: imageSize.width, height: imageSize.height))
             guard !boundingBox.isNull,
                   boundingBox.width >= 1,
-                  boundingBox.height >= 1,
-                  allowEdgeText || boundingBox.isSafelyInside(imageSize: imageSize) else {
+                  boundingBox.height >= 1 else {
                 return nil
             }
-            return OCRBlockDTO(
+            return OCRRunDTO(
                 text: run,
-                boundingBox: OCRRectDTO(rect: boundingBox),
-                detectedLanguage: "en",
-                visualStyle: estimateVisualStyle(
-                    in: image,
-                    boundingBox: boundingBox,
-                    confidence: candidate.confidence
-                )
+                boundingBox: OCRRectDTO(rect: boundingBox)
             )
         }
+
+        return OCRBlockDTO(
+            text: text,
+            boundingBox: OCRRectDTO(rect: lineBoundingBox),
+            detectedLanguage: text.containsHanCharacter ? "mixed" : (text.containsLatinLetter ? "en" : "und"),
+            visualStyle: estimateVisualStyle(
+                in: image,
+                boundingBox: lineBoundingBox,
+                confidence: candidate.confidence
+            ),
+            englishRuns: englishRuns
+        )
     }
 
     private static func englishRanges(in text: String) -> [Range<String.Index>] {
@@ -368,6 +389,12 @@ private struct OCRBlockDTO: Encodable {
     let boundingBox: OCRRectDTO
     let detectedLanguage: String
     let visualStyle: OCRStyleDTO
+    let englishRuns: [OCRRunDTO]
+}
+
+private struct OCRRunDTO: Encodable {
+    let text: String
+    let boundingBox: OCRRectDTO
 }
 
 private struct OCRStyleDTO: Encodable {

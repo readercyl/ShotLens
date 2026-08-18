@@ -260,11 +260,25 @@ enum SelectionGeometry {
             return nil
         }
 
+        let mappedRuns = block.englishRuns.compactMap { run -> TextRun? in
+            let mappedRunRect = CGRect(
+                x: (run.boundingBox.minX - userSelectionRectInOCR.minX) * scaleX,
+                y: (run.boundingBox.minY - userSelectionRectInOCR.minY) * scaleY,
+                width: run.boundingBox.width * scaleX,
+                height: run.boundingBox.height * scaleY
+            ).intersection(displayBounds)
+            guard !mappedRunRect.isNull, mappedRunRect.width >= 1, mappedRunRect.height >= 1 else {
+                return nil
+            }
+            return TextRun(text: run.text, boundingBox: mappedRunRect)
+        }
+
         return TextBlock(
             text: block.text,
             boundingBox: mappedRect,
             detectedLanguage: block.detectedLanguage,
-            visualStyle: block.visualStyle
+            visualStyle: block.visualStyle,
+            englishRuns: mappedRuns
         )
     }
 }

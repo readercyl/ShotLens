@@ -106,7 +106,6 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         window.contentView = contentView
 
         let toolbarWindow = OverlayToolbarWindow(anchorRect: windowRect)
-        toolbarWindow.onTogglePin = { [weak self] in self?.togglePinned() }
         toolbarWindow.onToggleMode = { [weak self] in
             Task { @MainActor in self?.toggleOriginalAndTranslation() }
         }
@@ -122,13 +121,19 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         toolbarWindow.onRetry = { [weak self] in self?.onRetry?() }
         toolbarWindow.setProcessing("正在识别")
 
+        let pinWindow = OverlayPinWindow(anchorRect: windowRect)
+        pinWindow.setScreenshot(croppedScreenshot)
+        pinWindow.onTogglePin = { [weak self] in self?.togglePinned() }
+
         self.resultWindow = window
         self.toolbarWindow = toolbarWindow
+        self.pinWindow = pinWindow
         self.contentView = contentView
 
         backdropWindows.forEach { $0.orderFrontRegardless() }
         window.orderFrontRegardless()
         toolbarWindow.orderFrontRegardless()
+        pinWindow.orderFrontRegardless()
     }
 
     @MainActor
@@ -149,7 +154,10 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         translationStatusMessage = isPartial ? "部分完成" : "翻译完成"
         contentView?.setTranslatedBlocks(blocks)
         contentView?.setDisplayMode(.translation)
-        toolbarWindow?.setSuccess(showingTranslation: isShowingTranslation)
+        toolbarWindow?.setSuccess(
+            showingTranslation: isShowingTranslation,
+            message: translationStatusMessage
+        )
         applyControlVisibility()
     }
 
@@ -212,6 +220,9 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
                 if self.toolbarWindow?.frame.contains(mouseLocation) == true {
                     return
                 }
+                if self.pinWindow?.frame.contains(mouseLocation) == true {
+                    return
+                }
                 self.dismissFromOutsideClick()
             }
         }
@@ -232,7 +243,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
 
     private func togglePinned() {
         isPinned.toggle()
-        toolbarWindow?.setPinned(isPinned)
+        pinWindow?.setPinned(isPinned)
         applyControlVisibility()
     }
 
@@ -287,6 +298,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     func windowDidMove(_ notification: Notification) {
         guard let resultWindow else { return }
         toolbarWindow?.updateAnchorRect(resultWindow.frame)
+        pinWindow?.updateAnchorRect(resultWindow.frame)
     }
 
     @MainActor
@@ -294,10 +306,10 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         isShowingTranslation.toggle()
         if isShowingTranslation {
             contentView?.setDisplayMode(.translation)
-            toolbarWindow?.setSuccess(showingTranslation: true)
+            toolbarWindow?.setSuccess(showingTranslation: true, message: translationStatusMessage)
         } else {
             contentView?.setDisplayMode(.original)
-            toolbarWindow?.setSuccess(showingTranslation: false)
+            toolbarWindow?.setSuccess(showingTranslation: false, message: "显示原文")
         }
     }
 
@@ -319,17 +331,22 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
             .map(\.translatedText)
             .joined(separator: "\n")
         ClipboardManager().copyTextToClipboard(text)
-        setToggleStatus(message: "已复制译文")
+        toolbarWindow?.showFeedback("已复制")
     }
 
     @MainActor
     private func setToggleStatus(message: String) {
-        toolbarWindow?.setSuccess(showingTranslation: isShowingTranslation)
+        toolbarWindow?.setSuccess(showingTranslation: isShowingTranslation, message: message)
         applyControlVisibility()
     }
 
     private func applyControlVisibility() {
-        toolbarWindow?.orderFrontRegardless()
+        if isPinned {
+            toolbarWindow?.orderOut(nil)
+        } else {
+            toolbarWindow?.orderFrontRegardless()
+        }
+        pinWindow?.orderFrontRegardless()
     }
 
     @MainActor
@@ -356,9 +373,6 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
 }
 
 private final class OverlayToolbarWindow: NSPanel {
-    var onTogglePin: (() -> Void)? {
-        didSet { toolbarView.onTogglePin = onTogglePin }
-    }
     var onToggleMode: (() -> Void)? {
         didSet { toolbarView.onToggleMode = onToggleMode }
     }
@@ -410,14 +424,14 @@ private final class OverlayToolbarWindow: NSPanel {
         orderFrontRegardless()
     }
 
-    func setSuccess(showingTranslation: Bool) {
-        toolbarView.setSuccess(showingTranslation: showingTranslation)
+    func setSuccess(showingTranslation: Bool, message: String) {
+        toolbarView.setSuccess(showingTranslation: showingTranslation, message: message)
         updateFrame()
         orderFrontRegardless()
     }
 
-    func setPinned(_ pinned: Bool) {
-        toolbarView.setPinned(pinned)
+    func showFeedback(_ message: String) {
+        toolbarView.showFeedback(message)
     }
 
     func updateAnchorRect(_ rect: CGRect) {
@@ -453,65 +467,57 @@ private final class OverlayToolbarWindow: NSPanel {
 }
 
 private final class OverlayToolbarView: NSView {
-    var onTogglePin: (() -> Void)? {
-        didSet { pinButton.onClick = onTogglePin }
-    }
     var onToggleMode: (() -> Void)? {
         didSet { modeButton.onClick = onToggleMode }
     }
     var onCopyText: (() -> Void)? {
         didSet { copyButton.onClick = onCopyText }
     }
-    var onCopyImage: (() -> Void)?
-    var onRetranslate: (() -> Void)?
+    var onCopyImage: (() -> Void)? {
+        didSet { copyImageButton.onClick = onCopyImage }
+    }
+    var onRetranslate: (() -> Void)? {
+        didSet { retranslateButton.onClick = { [weak self] in self?.performRetranslateOrRetry() } }
+    }
     var onRetry: (() -> Void)?
 
     private enum State {
         case processing(String)
         case failure(String)
-        case success(showingTranslation: Bool)
+        case success(showingTranslation: Bool, message: String)
     }
 
     private var state: State = .processing("正在识别")
-    private let pinButton = OverlayPinButton(frame: CGRect(x: 0, y: 0, width: 28, height: 28))
     private let modeButton = OverlayToolbarIconButton(symbolName: "eye", label: "显示原文")
     private let copyButton = OverlayToolbarIconButton(symbolName: "doc.on.doc", label: "复制译文")
-    private let moreButton = OverlayToolbarIconButton(symbolName: "ellipsis", label: "更多操作")
-    private let retryButton = OverlayToolbarTextButton(title: "重试")
+    private let retranslateButton = OverlayToolbarIconButton(symbolName: "arrow.clockwise", label: "重新翻译")
+    private let copyImageButton = OverlayToolbarIconButton(symbolName: "photo.on.rectangle", label: "复制截图")
     private let messageLabel = NSTextField(labelWithString: "")
-    private var menuTargets: [OverlayToolbarMenuTarget] = []
+    private var feedbackReset: DispatchWorkItem?
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
     override var mouseDownCanMoveWindow: Bool { false }
 
     var preferredSize: CGSize {
-        switch state {
-        case .success:
-            return CGSize(width: 148, height: 34)
-        case .processing(let message):
-            return CGSize(width: max(112, messageWidth(message) + 56), height: 34)
-        case .failure(let message):
-            return CGSize(width: min(230, max(158, messageWidth(message) + 92)), height: 34)
-        }
+        CGSize(width: 222, height: 34)
     }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         messageLabel.font = .systemFont(ofSize: 12, weight: .medium)
         messageLabel.textColor = .labelColor
+        messageLabel.alignment = .center
         messageLabel.lineBreakMode = .byTruncatingTail
         messageLabel.maximumNumberOfLines = 1
-        retryButton.onClick = { [weak self] in self?.onRetry?() }
         modeButton.onClick = onToggleMode
         copyButton.onClick = onCopyText
-        moreButton.onClick = { [weak self] in self?.showMoreMenu() }
-        pinButton.symbolColor = .labelColor
-        addSubview(pinButton)
+        retranslateButton.onClick = { [weak self] in self?.performRetranslateOrRetry() }
+        copyImageButton.onClick = onCopyImage
         addSubview(modeButton)
         addSubview(copyButton)
-        addSubview(moreButton)
-        addSubview(retryButton)
+        addSubview(retranslateButton)
+        addSubview(copyImageButton)
         addSubview(messageLabel)
         updateStateVisibility()
     }
@@ -530,32 +536,41 @@ private final class OverlayToolbarView: NSView {
         updateStateVisibility()
     }
 
-    func setSuccess(showingTranslation: Bool) {
-        state = .success(showingTranslation: showingTranslation)
+    func setSuccess(showingTranslation: Bool, message: String) {
+        feedbackReset?.cancel()
+        state = .success(showingTranslation: showingTranslation, message: message)
         updateStateVisibility()
     }
 
-    func setPinned(_ pinned: Bool) {
-        pinButton.isPinned = pinned
+    func showFeedback(_ message: String) {
+        guard case .success(let showingTranslation, _) = state else { return }
+        feedbackReset?.cancel()
+        state = .success(showingTranslation: showingTranslation, message: message)
+        updateStateVisibility()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self,
+                  case .success(let currentMode, _) = self.state else { return }
+            self.state = .success(showingTranslation: currentMode, message: "已翻译")
+            self.updateStateVisibility()
+        }
+        feedbackReset = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.1, execute: workItem)
     }
 
     override func layout() {
         super.layout()
-        pinButton.frame = CGRect(x: 6, y: 3, width: 28, height: 28)
         switch state {
-        case .success(let showingTranslation):
+        case .success(let showingTranslation, _):
             modeButton.symbolName = showingTranslation ? "eye" : "character"
             modeButton.label = showingTranslation ? "显示原文" : "显示翻译"
-            modeButton.frame = CGRect(x: 40, y: 3, width: 28, height: 28)
-            copyButton.frame = CGRect(x: 74, y: 3, width: 28, height: 28)
-            moreButton.frame = CGRect(x: 108, y: 3, width: 28, height: 28)
-        case .processing:
-            messageLabel.frame = CGRect(x: 40, y: 3, width: max(40, bounds.width - 48), height: 28)
-            retryButton.frame = .zero
-        case .failure:
-            retryButton.frame = CGRect(x: bounds.maxX - 48, y: 6, width: 40, height: 22)
-            messageLabel.frame = CGRect(x: 40, y: 3, width: max(36, retryButton.frame.minX - 48), height: 28)
+        case .processing, .failure:
+            break
         }
+        messageLabel.frame = CGRect(x: 8, y: 3, width: 66, height: 28)
+        modeButton.frame = CGRect(x: 82, y: 3, width: 28, height: 28)
+        copyButton.frame = CGRect(x: 116, y: 3, width: 28, height: 28)
+        retranslateButton.frame = CGRect(x: 150, y: 3, width: 28, height: 28)
+        copyImageButton.frame = CGRect(x: 184, y: 3, width: 28, height: 28)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -565,66 +580,80 @@ private final class OverlayToolbarView: NSView {
         let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 9, yRadius: 9)
         border.lineWidth = 1
         border.stroke()
+        NSColor.separatorColor.withAlphaComponent(0.7).setStroke()
+        let separator = NSBezierPath()
+        separator.move(to: CGPoint(x: 77.5, y: 7))
+        separator.line(to: CGPoint(x: 77.5, y: bounds.maxY - 7))
+        separator.lineWidth = 1
+        separator.stroke()
     }
 
     private func updateStateVisibility() {
+        modeButton.isHidden = false
+        copyButton.isHidden = false
+        retranslateButton.isHidden = false
+        copyImageButton.isHidden = false
+        messageLabel.isHidden = false
+
         switch state {
-        case .success:
-            messageLabel.isHidden = true
-            retryButton.isHidden = true
-            modeButton.isHidden = false
-            copyButton.isHidden = false
-            moreButton.isHidden = false
+        case .success(_, let message):
+            messageLabel.stringValue = message == "翻译完成" ? "已翻译" : message
+            modeButton.isEnabled = true
+            copyButton.isEnabled = true
+            retranslateButton.isEnabled = true
+            copyImageButton.isEnabled = true
+            retranslateButton.label = "重新翻译"
         case .processing(let message):
             messageLabel.stringValue = message
-            messageLabel.isHidden = false
-            retryButton.isHidden = true
-            modeButton.isHidden = true
-            copyButton.isHidden = true
-            moreButton.isHidden = true
+            modeButton.isEnabled = false
+            copyButton.isEnabled = false
+            retranslateButton.isEnabled = false
+            copyImageButton.isEnabled = false
+            retranslateButton.label = "重新翻译"
         case .failure(let message):
             messageLabel.stringValue = message
-            messageLabel.isHidden = false
-            retryButton.isHidden = false
-            modeButton.isHidden = true
-            copyButton.isHidden = true
-            moreButton.isHidden = true
+            modeButton.isEnabled = false
+            copyButton.isEnabled = false
+            retranslateButton.isEnabled = true
+            copyImageButton.isEnabled = false
+            retranslateButton.label = "重试"
         }
         needsLayout = true
         needsDisplay = true
     }
 
-    private func messageWidth(_ message: String) -> CGFloat {
-        ceil((message as NSString).size(withAttributes: [.font: messageLabel.font as Any]).width)
-    }
-
-    private func showMoreMenu() {
-        let menu = NSMenu()
-        menuTargets = [
-            OverlayToolbarMenuTarget { [weak self] in self?.onRetranslate?() },
-            OverlayToolbarMenuTarget { [weak self] in self?.onCopyImage?() }
-        ]
-        let retryItem = NSMenuItem(title: "重新翻译", action: #selector(OverlayToolbarMenuTarget.invoke(_:)), keyEquivalent: "")
-        retryItem.target = menuTargets[0]
-        let copyItem = NSMenuItem(title: "复制截图", action: #selector(OverlayToolbarMenuTarget.invoke(_:)), keyEquivalent: "")
-        copyItem.target = menuTargets[1]
-        menu.addItem(retryItem)
-        menu.addItem(copyItem)
-        menu.popUp(positioning: nil, at: CGPoint(x: bounds.maxX, y: bounds.maxY), in: self)
+    private func performRetranslateOrRetry() {
+        switch state {
+        case .failure:
+            onRetry?()
+        case .success:
+            onRetranslate?()
+        case .processing:
+            break
+        }
     }
 }
 
 private final class OverlayToolbarIconButton: NSControl {
     var symbolName: String { didSet { needsDisplay = true } }
-    var label: String { didSet { toolTip = label; needsDisplay = true } }
+    var label: String {
+        didSet {
+            toolTip = label
+            setAccessibilityLabel(label)
+            needsDisplay = true
+        }
+    }
     var onClick: (() -> Void)?
     private var isHovered = false { didSet { needsDisplay = true } }
+    private var isPressed = false { didSet { needsDisplay = true } }
 
     init(symbolName: String, label: String) {
         self.symbolName = symbolName
         self.label = label
         super.init(frame: .zero)
         toolTip = label
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(label)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -635,29 +664,44 @@ private final class OverlayToolbarIconButton: NSControl {
 
     override func updateTrackingAreas() {
         trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInKeyWindow], owner: self))
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
         super.updateTrackingAreas()
     }
 
     override func mouseEntered(with event: NSEvent) { isHovered = true }
     override func mouseExited(with event: NSEvent) { isHovered = false }
-    override func mouseDown(with event: NSEvent) { onClick?() }
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        isPressed = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            guard let self else { return }
+            self.isPressed = false
+            self.onClick?()
+        }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
-        if isHovered {
-            NSColor.labelColor.withAlphaComponent(0.1).setFill()
+        if isPressed || (isHovered && isEnabled) {
+            NSColor.labelColor.withAlphaComponent(isPressed ? 0.18 : 0.1).setFill()
             NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
         }
         guard let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label)?.withSymbolConfiguration(
             .init(pointSize: 14, weight: .medium)
         ) else { return }
         let size = image.size
-        image.draw(in: CGRect(
+        image.draw(
+            in: CGRect(
             x: floor((bounds.width - size.width) / 2),
             y: floor((bounds.height - size.height) / 2),
             width: size.width,
             height: size.height
-        ))
+            ),
+            from: .zero,
+            operation: .sourceOver,
+            fraction: isEnabled ? 1 : 0.32,
+            respectFlipped: true,
+            hints: nil
+        )
     }
 }
 
@@ -711,11 +755,13 @@ private final class OverlayPinWindow: NSPanel {
         level = OverlayWindow.controlLevel
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
+        hasShadow = false
         animationBehavior = .none
         isReleasedWhenClosed = false
         collectionBehavior = OverlayWindow.fullscreenOverlayBehavior
         pinButton.toolTip = "钉住浮框"
+        pinButton.setAccessibilityRole(.button)
+        pinButton.setAccessibilityLabel("钉住浮框")
         pinButton.onClick = { [weak self] in self?.onTogglePin?() }
         contentView = pinButton
     }
@@ -1280,9 +1326,6 @@ final class OverlayContentView: NSView {
             ).intersection(bounds)
         }
 
-        var renderItems: [(block: TranslatedBlock, layout: TextRenderLayout, backgroundColor: NSColor)] = []
-        renderItems.reserveCapacity(sortedBlocks.count)
-
         for (index, block) in sortedBlocks.enumerated() {
             let rect = sourceRects[index]
             guard rect.width > 0, rect.height > 0 else { continue }
@@ -1311,18 +1354,7 @@ final class OverlayContentView: NSView {
                 drawFallbackBackground(in: rect, forPixelRect: block.original.boundingBox)
             }
 
-            renderItems.append((
-                block: block,
-                layout: layout,
-                backgroundColor: sampledBackgroundColor(forPixelRect: block.original.boundingBox)
-            ))
-        }
-
-        // 先清理全部原文，再统一绘制译文，避免相邻语义块的背景恢复擦掉前一个译文。
-        for item in renderItems {
-            let block = item.block
-            let layout = item.layout
-            let backgroundColor = item.backgroundColor
+            let backgroundColor = sampledBackgroundColor(forPixelRect: block.original.boundingBox)
 
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: layout.font,
@@ -1440,24 +1472,40 @@ private final class OverlayPinButton: NSControl {
     var isPinned = false {
         didSet {
             toolTip = isPinned ? "解除钉住" : "钉住浮框"
+            setAccessibilityLabel(toolTip)
             needsDisplay = true
         }
     }
+    private var isHovered = false { didSet { needsDisplay = true } }
+    private var isPressed = false { didSet { needsDisplay = true } }
 
     override var mouseDownCanMoveWindow: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    override func updateTrackingAreas() {
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
+
     override func draw(_ dirtyRect: NSRect) {
+        NSColor.windowBackgroundColor.withAlphaComponent(0.94).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
+        NSColor.separatorColor.withAlphaComponent(0.75).setStroke()
+        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 7, yRadius: 7)
+        border.lineWidth = 1
+        border.stroke()
+        if isPressed || isHovered {
+            NSColor.labelColor.withAlphaComponent(isPressed ? 0.18 : 0.1).setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
+        }
         let image = NSImage(systemSymbolName: isPinned ? "pin.fill" : "pin", accessibilityDescription: isPinned ? "解除钉住" : "钉住")
         let symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
             .applying(.init(paletteColors: [symbolColor]))
         guard let configuredImage = image?.withSymbolConfiguration(symbolConfiguration) else { return }
-        NSGraphicsContext.saveGraphicsState()
-        let transform = NSAffineTransform()
-        transform.translateX(by: bounds.midX, yBy: bounds.midY)
-        transform.rotate(byDegrees: OverlayPinAppearance.symbolRotationDegrees(isPinned: isPinned))
-        transform.translateX(by: -bounds.midX, yBy: -bounds.midY)
-        transform.concat()
         let imageSize = configuredImage.size
         let imageRect = CGRect(
             x: floor((bounds.width - imageSize.width) / 2),
@@ -1473,10 +1521,16 @@ private final class OverlayPinButton: NSControl {
             respectFlipped: true,
             hints: nil
         )
-        NSGraphicsContext.restoreGraphicsState()
     }
 
-    override func mouseDown(with event: NSEvent) { onClick?() }
+    override func mouseDown(with event: NSEvent) {
+        isPressed = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            guard let self else { return }
+            self.isPressed = false
+            self.onClick?()
+        }
+    }
 }
 
 enum OverlayTextBackgroundRestorer {

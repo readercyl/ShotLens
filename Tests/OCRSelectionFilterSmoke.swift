@@ -28,20 +28,29 @@ struct OCRSelectionFilterSmoke {
             from: output.fileHandleForReading.readDataToEndOfFile()
         )
         let texts = blocks.map(\.text)
-        guard texts.contains("Complete"), texts.contains("English"), texts.contains("Text") else {
-            throw TestFailure("Fully selected English words were not preserved: \(texts)")
+        let englishRuns = blocks.flatMap(\.englishRuns).map(\.text)
+        guard texts.contains(where: { $0.contains("Complete English Text") }),
+              englishRuns.contains("Complete"),
+              englishRuns.contains("English"),
+              englishRuns.contains("Text") else {
+            throw TestFailure("Fully selected English line and ranges were not preserved: \(texts) / \(englishRuns)")
         }
-        guard texts.contains("Light"), texts.contains("Contrast"), texts.contains("Text") else {
-            throw TestFailure("Low-contrast light English words were not recognized: \(texts)")
+        guard texts.contains(where: { $0.contains("Light Contrast Text") }),
+              englishRuns.contains("Light"),
+              englishRuns.contains("Contrast") else {
+            throw TestFailure("Low-contrast English line was not recognized: \(texts) / \(englishRuns)")
         }
-        guard texts.contains("GPT-4o"), texts.contains("API"), texts.contains("v2.5") else {
-            throw TestFailure("Technical identifiers were changed or omitted: \(texts)")
+        guard texts.contains(where: { $0.contains("GPT-4o API v2.5") }),
+              englishRuns.contains("GPT-4o"),
+              englishRuns.contains("API"),
+              englishRuns.contains("v2.5") else {
+            throw TestFailure("Technical identifiers were changed or omitted: \(texts) / \(englishRuns)")
         }
-        guard texts.contains("English"), texts.contains("More") else {
-            throw TestFailure("Mixed-language lines must keep English runs: \(texts)")
+        guard englishRuns.contains("English"), englishRuns.contains("More") else {
+            throw TestFailure("Mixed-language lines must keep English ranges: \(texts) / \(englishRuns)")
         }
-        guard !texts.contains(where: { $0.contains("中文") || $0 == "X" || $0 == "#" }) else {
-            throw TestFailure("Chinese or OCR noise must not be emitted as English: \(texts)")
+        guard !englishRuns.contains(where: { $0.contains("中文") || $0 == "X" || $0 == "#" }) else {
+            throw TestFailure("Chinese or OCR noise must not be emitted as translatable English: \(englishRuns)")
         }
         guard !texts.contains(where: { $0.localizedCaseInsensitiveContains("boundary") }) else {
             throw TestFailure("Text clipped by the selection boundary must be ignored: \(texts)")
@@ -98,6 +107,11 @@ struct OCRSelectionFilterSmoke {
 }
 
 private struct OCRBlock: Decodable {
+    let text: String
+    let englishRuns: [OCRRun]
+}
+
+private struct OCRRun: Decodable {
     let text: String
 }
 
