@@ -29,7 +29,9 @@ struct OCREngine {
         try await withCheckedThrowingContinuation { continuation in
             let process = Process()
             process.executableURL = helperURL
-            process.arguments = [imageURL.path]
+            // 选区截图已由主进程扩展了 OCR 上下文；边缘文字是否属于用户选区
+            // 会在主进程按原始框选区域再次过滤。
+            process.arguments = [imageURL.path, "--allow-edge-text"]
 
             let stdout = Pipe()
             let stderr = Pipe()

@@ -28,17 +28,20 @@ struct OCRSelectionFilterSmoke {
             from: output.fileHandleForReading.readDataToEndOfFile()
         )
         let texts = blocks.map(\.text)
-        guard texts.contains(where: { $0.contains("Complete English Text") }) else {
-            throw TestFailure("Fully selected English text was not preserved: \(texts)")
+        guard texts.contains("Complete"), texts.contains("English"), texts.contains("Text") else {
+            throw TestFailure("Fully selected English words were not preserved: \(texts)")
         }
-        guard texts.contains(where: { $0.contains("Light Contrast Text") }) else {
-            throw TestFailure("Low-contrast light English text was not recognized: \(texts)")
+        guard texts.contains("Light"), texts.contains("Contrast"), texts.contains("Text") else {
+            throw TestFailure("Low-contrast light English words were not recognized: \(texts)")
         }
-        guard texts.contains(where: { $0.contains("GPT-4o API v2.5") }) else {
+        guard texts.contains("GPT-4o"), texts.contains("API"), texts.contains("v2.5") else {
             throw TestFailure("Technical identifiers were changed or omitted: \(texts)")
         }
-        guard texts.contains(where: { $0.contains("English") && $0.contains("More") }) else {
-            throw TestFailure("Mixed-language lines must retain their complete context: \(texts)")
+        guard texts.contains("English"), texts.contains("More") else {
+            throw TestFailure("Mixed-language lines must keep English runs: \(texts)")
+        }
+        guard !texts.contains(where: { $0.contains("中文") || $0 == "X" || $0 == "#" }) else {
+            throw TestFailure("Chinese or OCR noise must not be emitted as English: \(texts)")
         }
         guard !texts.contains(where: { $0.localizedCaseInsensitiveContains("boundary") }) else {
             throw TestFailure("Text clipped by the selection boundary must be ignored: \(texts)")

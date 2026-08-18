@@ -40,10 +40,6 @@ if [[ ! -f "$RELEASE_NOTES_PATH" ]]; then
 
 - ShotLens $VERSION 发布版本。
 
-## 注意事项
-
-- 默认福利 Key 可能限额、失效或被随时撤销，重度用户建议填写自己的 API Key。
-- \`tencent/Hunyuan-MT-7B\` 当前限免，后续以 SiliconFlow/模型服务商政策为准。
 EOF
 fi
 

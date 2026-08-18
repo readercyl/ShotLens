@@ -99,10 +99,8 @@ struct TranslationEndpointSmoke {
         try await assertProductIdentifierMayRemainUntranslated()
         try await assertPunctuatedIndexedJSONStaysSingleRequest()
         try await assertUntranslatedSentenceFailsWithoutSecondRequest()
-        try await assertEmptySavedSettingsUseDefaultAPI()
-        try await assertDefaultFallbackForcesBuiltInEndpointAndModel()
         try await assertCustomSavedSettingsSurviveLoad()
-        try await assertClearSavedSettingsDisableDefaultAPI()
+        try await assertEmptySavedSettingsStayUnconfigured()
         try await assertConnectionCheckUsesChatCompletions()
         try await assertConnectionCheckAcceptsPlainTextMicroTranslation()
         try await assertConnectionCheckAcceptsMalformedTranslationContent()
@@ -172,8 +170,7 @@ struct TranslationEndpointSmoke {
         let translator = LLMTranslator(settings: TranslationSettings(
             apiEndpoint: "https://api.deepseek.com",
             apiKey: "deepseek-test-key",
-            model: "deepseek-v4-flash",
-            defaultFallbackEnabled: false
+            model: "deepseek-v4-flash"
         ))
 
         let result = try await translator.translate(["Hello", "World"], from: "en", to: "zh-Hans")
@@ -189,91 +186,21 @@ struct TranslationEndpointSmoke {
         }
     }
 
-    private static func assertEmptySavedSettingsUseDefaultAPI() async throws {
-        let defaults = UserDefaults.standard
-        let originalEndpoint = defaults.object(forKey: TranslationSettings.apiEndpointKey)
-        let originalKey = defaults.object(forKey: TranslationSettings.apiKeyKey)
-        let originalModel = defaults.object(forKey: TranslationSettings.modelKey)
-        let originalFallback = defaults.object(forKey: TranslationSettings.defaultFallbackEnabledKey)
-        defer {
-            restore(originalEndpoint, forKey: TranslationSettings.apiEndpointKey)
-            restore(originalKey, forKey: TranslationSettings.apiKeyKey)
-            restore(originalModel, forKey: TranslationSettings.modelKey)
-            restore(originalFallback, forKey: TranslationSettings.defaultFallbackEnabledKey)
-        }
-
-        TranslationSettings.resetSavedConfiguration()
-
-        let settings = TranslationSettings.load()
-        guard settings.apiEndpoint.isEmpty else {
-            throw TestFailure("Expected default endpoint to stay out of the editable field")
-        }
-        guard settings.apiKey.isEmpty, settings.usesDefaultAPIKey else {
-            throw TestFailure("Expected saved API key to stay hidden while using default fallback")
-        }
-        guard settings.model.isEmpty else {
-            throw TestFailure("Expected default model to stay out of the editable field")
-        }
-        guard settings.effectiveAPIEndpoint == TranslationSettings.defaultAPIEndpoint,
-              settings.effectiveModel == TranslationSettings.defaultModel else {
-            throw TestFailure("Expected hidden default endpoint and model to remain effective")
-        }
-
-        MockOpenAIProtocol.reset()
-        let result = try await LLMTranslator(settings: settings)
-            .translate(["Hello", "World"], from: "en", to: "zh-Hans")
-        guard result == ["你好", "世界"] else {
-            throw TestFailure("Unexpected translations with default settings: \(result)")
-        }
-        guard MockOpenAIProtocol.requestedHosts == ["api.siliconflow.cn"],
-              MockOpenAIProtocol.requestedPaths == ["/v1/chat/completions"] else {
-            throw TestFailure("Expected default SiliconFlow chat completions request, got \(MockOpenAIProtocol.requestedHosts) \(MockOpenAIProtocol.requestedPaths)")
-        }
-        guard MockOpenAIProtocol.authorizationHeaders == ["Bearer \(TranslationSettings.defaultAPIKey)"] else {
-            throw TestFailure("Expected translator to use hidden default API key")
-        }
-        let firstBody = MockOpenAIProtocol.requestBodies.first ?? ""
-        guard firstBody.contains("Hunyuan-MT-7B"),
-              firstBody.contains(#"0\tHello"#),
-              firstBody.contains("one tab"),
-              !firstBody.contains("response_format") else {
-            throw TestFailure("Expected default SiliconFlow payload to use numbered text, got: \(firstBody)")
-        }
-    }
-
-    private static func assertDefaultFallbackForcesBuiltInEndpointAndModel() async throws {
-        let settings = TranslationSettings(
-            apiEndpoint: "https://unexpected.example/v1",
-            apiKey: "",
-            model: "unexpected-model",
-            defaultFallbackEnabled: true
-        )
-
-        guard settings.usesDefaultAPIKey,
-              settings.effectiveAPIEndpoint == TranslationSettings.defaultAPIEndpoint,
-              settings.effectiveModel == TranslationSettings.defaultModel else {
-            throw TestFailure("Expected default fallback to ignore saved endpoint and model overrides")
-        }
-    }
-
     private static func assertCustomSavedSettingsSurviveLoad() async throws {
         let defaults = UserDefaults.standard
         let originalEndpoint = defaults.object(forKey: TranslationSettings.apiEndpointKey)
         let originalKey = defaults.object(forKey: TranslationSettings.apiKeyKey)
         let originalModel = defaults.object(forKey: TranslationSettings.modelKey)
-        let originalFallback = defaults.object(forKey: TranslationSettings.defaultFallbackEnabledKey)
         defer {
             restore(originalEndpoint, forKey: TranslationSettings.apiEndpointKey)
             restore(originalKey, forKey: TranslationSettings.apiKeyKey)
             restore(originalModel, forKey: TranslationSettings.modelKey)
-            restore(originalFallback, forKey: TranslationSettings.defaultFallbackEnabledKey)
         }
 
         TranslationSettings(
             apiEndpoint: "https://custom.example/v1",
             apiKey: "custom-key",
-            model: "custom-model",
-            defaultFallbackEnabled: false
+            model: "custom-model"
         ).save()
 
         let loaded = TranslationSettings.load()
@@ -282,43 +209,29 @@ struct TranslationEndpointSmoke {
               loaded.model == "custom-model",
               loaded.effectiveAPIEndpoint == "https://custom.example/v1",
               loaded.effectiveAPIKey == "custom-key",
-              loaded.effectiveModel == "custom-model",
-              !loaded.usesDefaultAPIKey else {
+              loaded.effectiveModel == "custom-model" else {
             throw TestFailure("Expected custom API settings to survive load, got \(loaded)")
         }
     }
 
-    private static func assertClearSavedSettingsDisableDefaultAPI() async throws {
+    private static func assertEmptySavedSettingsStayUnconfigured() async throws {
         let defaults = UserDefaults.standard
         let originalEndpoint = defaults.object(forKey: TranslationSettings.apiEndpointKey)
         let originalKey = defaults.object(forKey: TranslationSettings.apiKeyKey)
         let originalModel = defaults.object(forKey: TranslationSettings.modelKey)
-        let originalFallback = defaults.object(forKey: TranslationSettings.defaultFallbackEnabledKey)
         defer {
             restore(originalEndpoint, forKey: TranslationSettings.apiEndpointKey)
             restore(originalKey, forKey: TranslationSettings.apiKeyKey)
             restore(originalModel, forKey: TranslationSettings.modelKey)
-            restore(originalFallback, forKey: TranslationSettings.defaultFallbackEnabledKey)
-        }
-
-        TranslationSettings.clearSavedConfiguration()
-        let cleared = TranslationSettings.load()
-        guard !cleared.defaultFallbackEnabled,
-              cleared.apiEndpoint.isEmpty,
-              cleared.apiKey.isEmpty,
-              cleared.model.isEmpty,
-              !cleared.isLLMConfigured else {
-            throw TestFailure("Expected clear to disable default fallback, got \(cleared)")
         }
 
         TranslationSettings.resetSavedConfiguration()
-        let restored = TranslationSettings.load()
-        guard restored.defaultFallbackEnabled,
-              restored.usesDefaultAPIKey,
-              restored.isLLMConfigured,
-              restored.effectiveAPIEndpoint == TranslationSettings.defaultAPIEndpoint,
-              restored.effectiveModel == TranslationSettings.defaultModel else {
-            throw TestFailure("Expected reset to restore default fallback, got \(restored)")
+        let settings = TranslationSettings.load()
+        guard settings.apiEndpoint.isEmpty,
+              settings.apiKey.isEmpty,
+              settings.model.isEmpty,
+              !settings.isLLMConfigured else {
+            throw TestFailure("Expected empty saved settings to remain unconfigured, got \(settings)")
         }
     }
 
@@ -983,7 +896,6 @@ private final class MockOpenAIProtocol: URLProtocol {
 
     override class func canInit(with request: URLRequest) -> Bool {
         request.url?.host == "shotlens-test.local"
-            || request.url?.host == "api.siliconflow.cn"
             || request.url?.host == "api.xiaomimimo.com"
             || request.url?.host == "api.deepseek.com"
     }

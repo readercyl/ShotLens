@@ -5,38 +5,25 @@ struct TranslationSettings {
     static let apiEndpointKey = "ShotLens_LLM_APIEndpoint"
     static let apiKeyKey = "ShotLens_LLM_APIKey"
     static let modelKey = "ShotLens_LLM_Model"
-    static let defaultFallbackEnabledKey = "ShotLens_LLM_DefaultFallbackEnabled"
-    static let defaultAPIEndpoint = "https://api.siliconflow.cn/v1"
-    static let defaultAPIKey = "sk-cbmblkvvwgpglgqitsvhoksrvghbpgsqvqfyenpjelcpymzp"
-    static let defaultModel = "tencent/Hunyuan-MT-7B"
-    static let limitedFreeModelNotice = "腾讯混元模型当前限免；政策结束或出现异常消耗时，默认限免可能停用，建议自备 API。"
 
     var apiEndpoint: String
     var apiKey: String
     var model: String
-    var defaultFallbackEnabled: Bool = true
 
     var isLLMConfigured: Bool {
         !effectiveAPIEndpoint.isEmpty && !effectiveAPIKey.isEmpty
     }
 
-    var usesDefaultAPIKey: Bool {
-        shouldUseDefaultFallback
-    }
-
     var effectiveAPIEndpoint: String {
-        let trimmed = apiEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-        return shouldUseDefaultFallback ? Self.defaultAPIEndpoint : trimmed
+        apiEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var effectiveAPIKey: String {
-        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        return shouldUseDefaultFallback ? Self.defaultAPIKey : trimmed
+        apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var effectiveModel: String {
-        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        return shouldUseDefaultFallback ? Self.defaultModel : trimmed
+        model.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var chatCompletionsURL: URL? {
@@ -67,7 +54,7 @@ struct TranslationSettings {
 
     var apiAvailabilityText: String {
         guard isLLMConfigured else { return "未配置" }
-        return usesDefaultAPIKey ? "使用默认限免" : "使用自定义 API"
+        return "使用自定义 API"
     }
 
     var translationAvailabilitySummary: String {
@@ -76,15 +63,10 @@ struct TranslationSettings {
 
     static func load() -> TranslationSettings {
         let defaults = UserDefaults.standard
-        let fallbackEnabled = defaults.object(forKey: defaultFallbackEnabledKey) as? Bool ?? true
-        let apiKey = defaults.string(forKey: apiKeyKey) ?? ""
-        let usesDefaultFallback = fallbackEnabled
-            && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return TranslationSettings(
-            apiEndpoint: usesDefaultFallback ? "" : (defaults.string(forKey: apiEndpointKey) ?? ""),
-            apiKey: apiKey,
-            model: usesDefaultFallback ? "" : (defaults.string(forKey: modelKey) ?? ""),
-            defaultFallbackEnabled: fallbackEnabled
+            apiEndpoint: defaults.string(forKey: apiEndpointKey) ?? "",
+            apiKey: defaults.string(forKey: apiKeyKey) ?? "",
+            model: defaults.string(forKey: modelKey) ?? ""
         )
     }
 
@@ -93,7 +75,6 @@ struct TranslationSettings {
         defaults.set(apiEndpoint.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Self.apiEndpointKey)
         defaults.set(apiKey.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Self.apiKeyKey)
         defaults.set(model.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Self.modelKey)
-        defaults.set(defaultFallbackEnabled, forKey: Self.defaultFallbackEnabledKey)
         defaults.synchronize()
         NotificationCenter.default.post(name: Self.didChangeNotification, object: nil)
     }
@@ -103,7 +84,6 @@ struct TranslationSettings {
         defaults.removeObject(forKey: apiEndpointKey)
         defaults.removeObject(forKey: apiKeyKey)
         defaults.removeObject(forKey: modelKey)
-        defaults.removeObject(forKey: defaultFallbackEnabledKey)
         defaults.synchronize()
         NotificationCenter.default.post(name: didChangeNotification, object: nil)
     }
@@ -113,14 +93,8 @@ struct TranslationSettings {
         defaults.set("", forKey: apiEndpointKey)
         defaults.set("", forKey: apiKeyKey)
         defaults.set("", forKey: modelKey)
-        defaults.set(false, forKey: defaultFallbackEnabledKey)
         defaults.synchronize()
         NotificationCenter.default.post(name: didChangeNotification, object: nil)
-    }
-
-    private var shouldUseDefaultFallback: Bool {
-        guard defaultFallbackEnabled else { return false }
-        return apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var normalizedEndpointString: String {

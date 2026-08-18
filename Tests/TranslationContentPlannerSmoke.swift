@@ -5,7 +5,7 @@ import Foundation
 struct TranslationContentPlannerSmoke {
     static func main() throws {
         try assertChineseOnlyIsExcluded()
-        try assertMixedTextKeepsCompleteContext()
+        try assertMixedTextOnlyKeepsEnglishRuns()
         try assertEnglishOnlyStaysSingleItem()
         try assertPartialTranslationsKeepIndependentBlocks()
         try assertWrappedHeadingAndParagraphFormSemanticBlocks()
@@ -23,14 +23,14 @@ struct TranslationContentPlannerSmoke {
         }
     }
 
-    private static func assertMixedTextKeepsCompleteContext() throws {
-        let original = "保留中文 English 中间文字 OpenAI"
-        let plan = TranslationContentPlan.make(from: [block(original)])
-        guard plan.sourceTexts == [original] else {
-            throw TestFailure("Mixed-language context must remain one translation item: \(plan.sourceTexts)")
-        }
-        guard plan.applying(["保留中文 英语 中间文字 开放人工智能"])?.map(\.translatedText) == ["保留中文 英语 中间文字 开放人工智能"] else {
-            throw TestFailure("The complete mixed-language translation was not applied")
+    private static func assertMixedTextOnlyKeepsEnglishRuns() throws {
+        let plan = TranslationContentPlan.make(from: [
+            block("English", x: 80, y: 20, width: 120),
+            block("More", x: 250, y: 20, width: 80)
+        ])
+        guard plan.sourceTexts == ["English", "More"],
+              plan.applying(["英语", "更多"])?.map(\.translatedText) == ["英语", "更多"] else {
+            throw TestFailure("Mixed-language selection must send and cover English runs only: \(plan.sourceTexts)")
         }
     }
 

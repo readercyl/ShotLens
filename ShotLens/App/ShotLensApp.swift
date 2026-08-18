@@ -355,6 +355,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 从文本框直接抓设置，不依赖 UserDefaults 时序
         let translationSettings = await MainActor.run { mainWindowController.currentDraftSettings() }
 
+        guard translationSettings.isLLMConfigured else {
+            ShotLensLogger.log("自定义 API 未配置，停止截图翻译")
+            await MainActor.run { openMainWindow() }
+            return
+        }
+
         let capture = ScreenshotCapture()
         let targetMouseLocation = NSEvent.mouseLocation
 
@@ -392,9 +398,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         ShotLensLogger.log("选区完成 x=\(selection.minX) y=\(selection.minY) width=\(selection.width) height=\(selection.height)")
 
+        let captureSelection = SelectionGeometry.expandedRect(
+            for: selection,
+            within: frozenSnapshot.screenRect
+        )
         let captured: CapturedScreenshot?
         do {
-            captured = try capture.crop(frozenSnapshot: frozenSnapshot, selection: selection)
+            captured = try capture.crop(
+                frozenSnapshot: frozenSnapshot,
+                selection: captureSelection,
+                userSelection: selection
+            )
         } catch {
             ShotLensLogger.log("冻结截图裁剪失败", error: error)
             return
@@ -405,10 +419,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        await MainActor.run {
-            ClipboardManager().copyImageToClipboard(image: captured.image)
+        let clipboardCapture: CapturedScreenshot?
+        do {
+            clipboardCapture = try capture.crop(
+                frozenSnapshot: frozenSnapshot,
+                selection: selection
+            )
+        } catch {
+            clipboardCapture = nil
+            ShotLensLogger.log("原始框选截图裁剪失败，使用 OCR 截图写入剪贴板", error: error)
         }
-        ShotLensLogger.log("框选截图已保存到剪贴板")
+        let clipboardImage = clipboardCapture?.image ?? captured.image
+        await MainActor.run {
+            ClipboardManager().copyImageToClipboard(image: clipboardImage)
+        }
+        ShotLensLogger.log("原始框选截图已保存到剪贴板")
 
         let displayScale = max(
             CGFloat(captured.image.width) / max(selection.width, 1),
@@ -418,7 +443,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         await showInteractiveOverlay(
             captured: captured,
-            selection: selection,
+            selection: captureSelection,
             displayScale: displayScale,
             translationSettings: translationSettings
         )
@@ -450,14 +475,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        guard !textBlocks.isEmpty else {
+        let selectedTextBlocks = textBlocks.filter {
+            SelectionGeometry.shouldInclude($0.boundingBox, in: captured.userSelectionRectInImage)
+        }
+        guard !selectedTextBlocks.isEmpty else {
             ShotLensLogger.log("未识别到文字")
             overlay?.setMessage("未识别到文字")
             return
         }
-        ShotLensLogger.log(String(format: "OCR 完成，识别 %d 个文本块，耗时 %.2fs", textBlocks.count, Date().timeIntervalSince(ocrStartedAt)))
-        let semanticBlocks = SemanticTextGrouper.merge(textBlocks)
-        ShotLensLogger.log("语义分组完成，\(textBlocks.count) 个 OCR 行合并为 \(semanticBlocks.count) 个文本块")
+        ShotLensLogger.log(String(format: "OCR 完成，识别 %d 个文本块，选区内 %d 个，耗时 %.2fs", textBlocks.count, selectedTextBlocks.count, Date().timeIntervalSince(ocrStartedAt)))
+        let semanticBlocks = SemanticTextGrouper.merge(selectedTextBlocks)
+        ShotLensLogger.log("语义分组完成，\(selectedTextBlocks.count) 个 OCR 行合并为 \(semanticBlocks.count) 个文本块")
         let contentPlan = TranslationContentPlan.make(from: semanticBlocks)
         guard !contentPlan.sourceTexts.isEmpty else {
             ShotLensLogger.log("选区内没有需要翻译的英文")

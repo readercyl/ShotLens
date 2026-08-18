@@ -156,8 +156,8 @@ private final class InProcessSelectionView: NSView {
         isDragging = false
 
         guard let rect = selectionRect,
-              rect.width >= 20,
-              rect.height >= 20 else {
+              rect.width >= 8,
+              rect.height >= 8 else {
             onComplete?(nil)
             return
         }

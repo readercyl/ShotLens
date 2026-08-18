@@ -9,12 +9,15 @@ import Darwin
 struct ShotLensOCR {
     static func main() {
         do {
-            guard CommandLine.arguments.count == 2 else {
+            guard CommandLine.arguments.count >= 2 else {
                 throw OCRToolError.missingImagePath
             }
 
             let imageURL = URL(fileURLWithPath: CommandLine.arguments[1])
-            let blocks = try recognizeText(in: imageURL)
+            let blocks = try recognizeText(
+                in: imageURL,
+                allowEdgeText: CommandLine.arguments.contains("--allow-edge-text")
+            )
             let data = try JSONEncoder().encode(blocks)
             FileHandle.standardOutput.write(data)
             exit(0)
@@ -27,17 +30,17 @@ struct ShotLensOCR {
         }
     }
 
-    private static func recognizeText(in imageURL: URL) throws -> [OCRBlockDTO] {
+    private static func recognizeText(in imageURL: URL, allowEdgeText: Bool) throws -> [OCRBlockDTO] {
         guard let source = CGImageSourceCreateWithURL(imageURL as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             throw OCRToolError.unreadableImage
         }
 
-        let originalBlocks = try recognizeTextBlocks(in: image, sourceImage: image)
+        let originalBlocks = try recognizeTextBlocks(in: image, sourceImage: image, allowEdgeText: allowEdgeText)
         guard let enhanced = enhancedRecognitionImage(from: image) else {
             return originalBlocks
         }
-        let enhancedBlocks = try recognizeTextBlocks(in: enhanced, sourceImage: image)
+        let enhancedBlocks = try recognizeTextBlocks(in: enhanced, sourceImage: image, allowEdgeText: allowEdgeText)
         return mergeRecognitionPasses(primary: originalBlocks, supplemental: enhancedBlocks)
     }
 
@@ -67,7 +70,11 @@ struct ShotLensOCR {
         }
     }
 
-    private static func recognizeTextBlocks(in recognitionImage: CGImage, sourceImage: CGImage) throws -> [OCRBlockDTO] {
+    private static func recognizeTextBlocks(
+        in recognitionImage: CGImage,
+        sourceImage: CGImage,
+        allowEdgeText: Bool
+    ) throws -> [OCRBlockDTO] {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
@@ -102,13 +109,14 @@ struct ShotLensOCR {
         }
 
         let imageSize = CGSize(width: sourceImage.width, height: sourceImage.height)
-        return observations.compactMap { observation -> OCRBlockDTO? in
-            guard let candidate = bestCandidate(from: observation) else { return nil }
-            return textBlock(
+        return observations.flatMap { observation -> [OCRBlockDTO] in
+            guard let candidate = bestCandidate(from: observation) else { return [] }
+            return textBlocks(
                 from: candidate,
                 observation: observation,
                 image: sourceImage,
-                imageSize: imageSize
+                imageSize: imageSize,
+                allowEdgeText: allowEdgeText
             )
         }
     }
@@ -119,12 +127,13 @@ struct ShotLensOCR {
             .max { $0.confidence < $1.confidence }
     }
 
-    private static func textBlock(
+    private static func textBlocks(
         from candidate: VNRecognizedText,
         observation: VNRecognizedTextObservation,
         image: CGImage,
-        imageSize: CGSize
-    ) -> OCRBlockDTO? {
+        imageSize: CGSize,
+        allowEdgeText: Bool
+    ) -> [OCRBlockDTO] {
         let text = candidate.string
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(
@@ -132,20 +141,81 @@ struct ShotLensOCR {
                 with: "GPT-4o",
                 options: [.regularExpression, .caseInsensitive]
             )
-        guard text.hasMeaningfulOCRContent else { return nil }
+        guard text.hasMeaningfulOCRContent else { return [] }
 
-        let boundingBox = observation.boundingBox.fromVisionNormalized(to: imageSize)
-        guard boundingBox.isSafelyInside(imageSize: imageSize) else { return nil }
-        return OCRBlockDTO(
-            text: text,
-            boundingBox: OCRRectDTO(rect: boundingBox),
-            detectedLanguage: text.containsHanCharacter ? "mixed" : "en",
-            visualStyle: estimateVisualStyle(
-                in: image,
-                boundingBox: boundingBox,
-                confidence: candidate.confidence
+        let ranges = englishRanges(in: text)
+        return ranges.compactMap { range -> OCRBlockDTO? in
+            let rawRun = String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let run = rawRun
+            guard run.containsLatinLetter else { return nil }
+            if run.count == 1, !run.first!.isNumber, ranges.count > 1 {
+                // 混合语言截图中，Vision 偶尔会把单个汉字误报成 X/#/I；
+                // 独立单字不作为英文翻译目标。
+                return nil
+            }
+            guard let normalizedRange = text.range(of: run, range: range),
+                  let runBox = try? candidate.boundingBox(for: normalizedRange) else {
+                return nil
+            }
+            let boundingBox = runBox.boundingBox
+                .fromVisionNormalized(to: imageSize)
+                .intersection(CGRect(x: 0, y: 0, width: imageSize.width, height: imageSize.height))
+            guard !boundingBox.isNull,
+                  boundingBox.width >= 1,
+                  boundingBox.height >= 1,
+                  allowEdgeText || boundingBox.isSafelyInside(imageSize: imageSize) else {
+                return nil
+            }
+            return OCRBlockDTO(
+                text: run,
+                boundingBox: OCRRectDTO(rect: boundingBox),
+                detectedLanguage: "en",
+                visualStyle: estimateVisualStyle(
+                    in: image,
+                    boundingBox: boundingBox,
+                    confidence: candidate.confidence
+                )
             )
-        )
+        }
+    }
+
+    private static func englishRanges(in text: String) -> [Range<String.Index>] {
+        let characters = Array(text)
+        var ranges: [(Int, Int)] = []
+        var start: Int?
+        var end = 0
+
+        func flush() {
+            guard let start, end > start else { return }
+            ranges.append((start, end))
+        }
+
+        for index in characters.indices {
+            let character = characters[index]
+            if character.isLatinLetter {
+                if start == nil { start = index }
+                end = index + 1
+                continue
+            }
+
+            if start != nil, character.isNumber || "-_.,;:!?='&%+()[]#~".contains(character) {
+                end = index + 1
+                continue
+            }
+
+            flush()
+            start = nil
+            end = index + 1
+        }
+        flush()
+
+        return ranges.compactMap { start, end in
+            guard start < end else { return nil }
+            let lower = text.index(text.startIndex, offsetBy: start)
+            let upper = text.index(text.startIndex, offsetBy: end)
+            let range = lower..<upper
+            return String(text[range]).containsLatinLetter ? range : nil
+        }
     }
 
     /// 轻量提高低对比度浅色字的边缘，不改变尺寸，因此坐标仍可直接映射回原截图。
@@ -406,5 +476,15 @@ private extension String {
         containsLatinLetter
             || containsHanCharacter
             || unicodeScalars.contains(where: { CharacterSet.decimalDigits.contains($0) })
+    }
+}
+
+private extension Character {
+    var isLatinLetter: Bool {
+        unicodeScalars.contains { scalar in
+            (65...90).contains(Int(scalar.value))
+                || (97...122).contains(Int(scalar.value))
+                || (0x00C0...0x024F).contains(Int(scalar.value))
+        }
     }
 }

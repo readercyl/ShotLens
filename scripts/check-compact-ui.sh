@@ -19,15 +19,7 @@ rg -n 'checkUpdateButton.title = "检测中…"' "$MAIN_WINDOW" >/dev/null
 rg -n 'flushPendingSave\(\)' "$MAIN_WINDOW" >/dev/null
 rg -n 'syncAPIKeyDraftFromField' "$MAIN_WINDOW" >/dev/null
 rg -n 'NSButton\(title: "清空"' "$MAIN_WINDOW" >/dev/null
-rg -n 'NSButton\(title: "恢复默认"' "$MAIN_WINDOW" >/dev/null
 rg -n 'NSButton\(title: "测试"' "$MAIN_WINDOW" >/dev/null
-rg -n 'apiDefaultNoteLabel' "$MAIN_WINDOW" >/dev/null
-rg -n '默认限免' "$MAIN_WINDOW" >/dev/null
-rg -n '腾讯混元模型当前限免' "$TRANSLATION_SETTINGS" >/dev/null
-if rg -n '腾讯混元 MT' "$TRANSLATION_SETTINGS" >/dev/null; then
-  echo "Default API notice should use 腾讯混元模型 without MT." >&2
-  exit 1
-fi
 rg -n -F 'contentRect: NSRect(x: 0, y: 0, width: 430, height: 442)' "$MAIN_WINDOW" >/dev/null
 rg -n -F 'row.widthAnchor.constraint(equalToConstant: 398)' "$MAIN_WINDOW" >/dev/null
 rg -n -F 'card.widthAnchor.constraint(equalToConstant: 398)' "$MAIN_WINDOW" >/dev/null
@@ -35,15 +27,12 @@ rg -n -F 'icon.widthAnchor.constraint(equalToConstant: 58)' "$MAIN_WINDOW" >/dev
 rg -n -F 'label("ShotLens", font: .systemFont(ofSize: 28, weight: .semibold))' "$MAIN_WINDOW" >/dev/null
 rg -n -F 'recorder.widthAnchor.constraint(equalToConstant: 180)' "$MAIN_WINDOW" >/dev/null
 rg -n -F 'let rightControl = makeRightControlContainer(width: 180)' "$MAIN_WINDOW" >/dev/null
-rg -n -F 'note.widthAnchor.constraint(equalToConstant: 366)' "$MAIN_WINDOW" >/dev/null
 if rg -n '用于冻结屏幕和框选翻译|按下后直接进入截图框选|登录 Mac 后自动启动 ShotLens' "$MAIN_WINDOW" >/dev/null; then
   echo "Primary settings cards should not keep secondary descriptions." >&2
   exit 1
 fi
-rg -n -F 'note.lineBreakMode = .byWordWrapping' "$MAIN_WINDOW" >/dev/null
-rg -n -F 'note.maximumNumberOfLines = 0' "$MAIN_WINDOW" >/dev/null
-rg -n 'usesDefaultAPIKey \\|\\| !isApiDetailsExpanded' "$MAIN_WINDOW" >/dev/null
-rg -n -F 'toggleAPIButton.title = usesDefaultAPIKey ? "自备 API"' "$MAIN_WINDOW" >/dev/null
+rg -n -F 'apiDetailsContainer?.isHidden = !isApiDetailsExpanded' "$MAIN_WINDOW" >/dev/null
+rg -n -F 'toggleAPIButton.title = isApiDetailsExpanded ? "收起" : "展开"' "$MAIN_WINDOW" >/dev/null
 rg -n 'scheduleAutomaticUpdateChecks' "$MAIN_WINDOW" >/dev/null
 rg -n 'performAutomaticUpdateCheckIfNeeded' "$MAIN_WINDOW" >/dev/null
 rg -n 'automaticallyInstalls: true' "$MAIN_WINDOW" >/dev/null

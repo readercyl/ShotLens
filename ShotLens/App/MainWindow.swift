@@ -9,7 +9,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private var permissionStatusLabel: NSTextField?
     private var apiStatusLabel: NSTextField?
     private var updateStatusLabel: NSTextField?
-    private var apiDefaultNoteLabel: NSTextField?
     private var launchAtLoginSwitch: BlueSwitchControl?
     private let checkUpdateButton = NSButton()
     private let installUpdateButton = NSButton()
@@ -19,7 +18,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private let apiEndpointField = NSTextField()
     private let apiKeyField = NSTextField()
     private var apiKeyValue = ""
-    private var defaultFallbackEnabled = true
     private let apiKeyEyeButton = NSButton()
     private var isApiKeyVisible = false
     private var apiKeyAutoRevealed = false
@@ -344,15 +342,11 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         let clearButton = NSButton(title: "清空", target: self, action: #selector(clearAPISettingsClicked))
         clearButton.bezelStyle = .rounded
         clearButton.widthAnchor.constraint(equalToConstant: 58).isActive = true
-        let restoreDefaultButton = NSButton(title: "恢复默认", target: self, action: #selector(restoreDefaultAPISettingsClicked))
-        restoreDefaultButton.bezelStyle = .rounded
-        restoreDefaultButton.widthAnchor.constraint(equalToConstant: 82).isActive = true
         let testButton = NSButton(title: "测试", target: self, action: #selector(testConnectionClicked))
         testButton.bezelStyle = .rounded
         testButton.widthAnchor.constraint(equalToConstant: 58).isActive = true
         actionRow.addArrangedSubview(actionSpacer)
         actionRow.addArrangedSubview(clearButton)
-        actionRow.addArrangedSubview(restoreDefaultButton)
         actionRow.addArrangedSubview(testButton)
 
         details.addArrangedSubview(fieldRow("地址", field: apiEndpointField))
@@ -360,13 +354,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         details.addArrangedSubview(modelFieldRow())
         details.addArrangedSubview(actionRow)
 
-        let note = label(TranslationSettings.limitedFreeModelNotice, font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
-        note.lineBreakMode = .byWordWrapping
-        note.maximumNumberOfLines = 0
-        note.widthAnchor.constraint(equalToConstant: 366).isActive = true
-        apiDefaultNoteLabel = note
         card.addArrangedSubview(details)
-        card.addArrangedSubview(note)
         return card
     }
 
@@ -582,15 +570,13 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     }
 
     private func updateAPIExpandedState() {
-        let usesDefaultAPIKey = currentDraftSettings().usesDefaultAPIKey
-        apiDetailsContainer?.isHidden = usesDefaultAPIKey || !isApiDetailsExpanded
-        toggleAPIButton.title = usesDefaultAPIKey ? "自备 API" : (isApiDetailsExpanded ? "收起" : "展开")
+        apiDetailsContainer?.isHidden = !isApiDetailsExpanded
+        toggleAPIButton.title = isApiDetailsExpanded ? "收起" : "展开"
     }
 
     private func updateWindowHeight(animated: Bool) {
         guard let window else { return }
-        let settings = currentDraftSettings()
-        let targetHeight: CGFloat = settings.usesDefaultAPIKey ? 442 : (isApiDetailsExpanded ? 526 : 404)
+        let targetHeight: CGFloat = isApiDetailsExpanded ? 526 : 404
         var frame = window.frame
         guard abs(frame.height - targetHeight) > 0.5 else { return }
         frame.origin.y += frame.height - targetHeight
@@ -615,7 +601,9 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         let settings = TranslationSettings.load()
         apiEndpointField.stringValue = settings.apiEndpoint
         apiKeyValue = settings.apiKey
-        defaultFallbackEnabled = settings.defaultFallbackEnabled
+        if !settings.isLLMConfigured {
+            isApiDetailsExpanded = true
+        }
         isApiKeyVisible = false
         apiKeyAutoRevealed = false
         updateApiKeyDisplay()
@@ -648,7 +636,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             if !settings.isLLMConfigured {
                 apiStatusLabel?.stringValue = "● 未配置"
             } else {
-                apiStatusLabel?.stringValue = settings.usesDefaultAPIKey ? "● 默认限免" : "● 自定义 API"
+                apiStatusLabel?.stringValue = "● 自定义 API"
             }
             apiStatusLabel?.textColor = .secondaryLabelColor
         case .testing:
@@ -658,21 +646,19 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             apiStatusLabel?.stringValue = "● 可用"
             apiStatusLabel?.textColor = .systemGreen
         case .transientFailure:
-            apiStatusLabel?.stringValue = currentDraftSettings().usesDefaultAPIKey ? "● 默认限免繁忙" : "● 暂时不可用"
+            apiStatusLabel?.stringValue = "● 暂时不可用"
             apiStatusLabel?.textColor = .systemOrange
         case .unavailable:
             apiStatusLabel?.stringValue = "● 不可用"
             apiStatusLabel?.textColor = .systemRed
         }
-        apiDefaultNoteLabel?.isHidden = !currentDraftSettings().usesDefaultAPIKey
     }
 
     func currentDraftSettings() -> TranslationSettings {
         TranslationSettings(
             apiEndpoint: apiEndpointField.stringValue,
             apiKey: apiKeyValue,
-            model: modelField.stringValue,
-            defaultFallbackEnabled: defaultFallbackEnabled
+            model: modelField.stringValue
         )
     }
 
@@ -739,23 +725,8 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         refreshStatus()
     }
 
-    @objc private func restoreDefaultAPISettingsClicked() {
-        pendingSave?.cancel()
-        TranslationSettings.resetSavedConfiguration()
-        connectionState = .untested
-        availableModels = []
-        loadSettings()
-        refreshStatus()
-    }
-
     @objc private func toggleAPIExpandedClicked() {
-        if currentDraftSettings().usesDefaultAPIKey {
-            defaultFallbackEnabled = false
-            isApiDetailsExpanded = true
-            currentDraftSettings().save()
-        } else {
-            isApiDetailsExpanded.toggle()
-        }
+        isApiDetailsExpanded.toggle()
         UserDefaults.standard.set(isApiDetailsExpanded, forKey: Self.apiDetailsExpandedKey)
         updateAPIExpandedState()
         refreshStatus()
@@ -1030,7 +1001,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     @objc private func modelSelected(_ sender: NSMenuItem) {
         modelField.stringValue = sender.title
-        defaultFallbackEnabled = false
         saveSettingsSoon()
     }
 
@@ -1064,7 +1034,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             }
 
             if field === apiEndpointField || field === apiKeyField || field === modelField {
-                defaultFallbackEnabled = false
                 markUntested()
             }
         }

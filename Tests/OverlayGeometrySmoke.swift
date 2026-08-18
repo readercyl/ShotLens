@@ -5,6 +5,8 @@ import Foundation
 struct OverlayGeometrySmoke {
     static func main() throws {
         try assertTinySelectionKeepsCapturedAspectRatio()
+        try assertSmallSelectionGetsOCRContext()
+        try assertBoundaryTextCanBeIncludedOnlyWhenItBelongsToSelection()
         try assertPixelRectKeepsExactTopLeftAnchor()
         try assertTextRemovalPreservesBackgroundVariation()
         try assertTextRemovalSurvivesImperfectForegroundEstimate()
@@ -135,6 +137,34 @@ struct OverlayGeometrySmoke {
         }
         guard result.origin == CGPoint(x: 100, y: 100) else {
             throw TestFailure("Expected overlay to keep the selected top-left anchor, got \(result.origin)")
+        }
+    }
+
+    private static func assertSmallSelectionGetsOCRContext() throws {
+        let screen = CGRect(x: 0, y: 0, width: 1_000, height: 800)
+        let selection = CGRect(x: 240, y: 310, width: 28, height: 18)
+        let expanded = SelectionGeometry.expandedRect(for: selection, within: screen)
+        guard expanded.minX < selection.minX,
+              expanded.minY < selection.minY,
+              expanded.maxX > selection.maxX,
+              expanded.maxY > selection.maxY else {
+            throw TestFailure("Small selections must receive OCR context padding")
+        }
+    }
+
+    private static func assertBoundaryTextCanBeIncludedOnlyWhenItBelongsToSelection() throws {
+        let selection = CGRect(x: 20, y: 20, width: 40, height: 20)
+        guard SelectionGeometry.shouldInclude(
+            CGRect(x: 18, y: 20, width: 22, height: 20),
+            in: selection
+        ) else {
+            throw TestFailure("A word crossing the selection edge should remain eligible")
+        }
+        guard !SelectionGeometry.shouldInclude(
+            CGRect(x: 80, y: 20, width: 22, height: 20),
+            in: selection
+        ) else {
+            throw TestFailure("A neighboring word outside the selection must be excluded")
         }
     }
 

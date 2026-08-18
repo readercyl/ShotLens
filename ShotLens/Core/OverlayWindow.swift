@@ -54,6 +54,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     private var resultWindow: OverlayResultWindow?
     private var statusWindow: OverlayStatusWindow?
     private var saveWindow: OverlaySaveWindow?
+    private var pinWindow: OverlayPinWindow?
     private var backdropWindows: [OverlayBackdropWindow] = []
     private var contentView: OverlayContentView?
     private var outsideClickMonitor: Any?
@@ -101,21 +102,26 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         let contentView = OverlayContentView(frame: NSRect(origin: .zero, size: windowRect.size))
         contentView.screenshot = croppedScreenshot
         contentView.displayScale = scale
-        contentView.onTogglePin = { [weak self] in
+        window.contentView = contentView
+
+        let pinWindow = OverlayPinWindow(anchorRect: windowRect)
+        pinWindow.setScreenshot(croppedScreenshot)
+        pinWindow.onTogglePin = { [weak self] in
             self?.togglePinned()
         }
-        window.contentView = contentView
 
         let statusWindow = OverlayStatusWindow(anchorRect: windowRect)
         statusWindow.setMessage("正在识别")
 
         self.resultWindow = window
         self.statusWindow = statusWindow
+        self.pinWindow = pinWindow
         self.contentView = contentView
 
         backdropWindows.forEach { $0.orderFrontRegardless() }
         window.orderFrontRegardless()
         statusWindow.orderFrontRegardless()
+        pinWindow.orderFrontRegardless()
     }
 
     @MainActor
@@ -142,12 +148,15 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
 
     @MainActor
     func setMessage(_ message: String) {
-        controlPhase = message.contains("失败") ? .failure : .processing
+        let isFailure = message.contains("失败")
+            || message.contains("未识别")
+            || message.contains("未配置")
+        controlPhase = isFailure ? .failure : .processing
         isRetranslating = false
         isShowingTranslation = true
         contentView?.setTranslatedBlocks([])
         contentView?.setDisplayMode(.translation)
-        if message.contains("失败") {
+        if isFailure {
             closeSaveWindow()
             statusWindow?.setFailure(message: message, retryTitle: "重新翻译") { [weak self] in
                 self?.onRetry?()
@@ -203,6 +212,9 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
                 if self.saveWindow?.frame.contains(mouseLocation) == true {
                     return
                 }
+                if self.pinWindow?.frame.contains(mouseLocation) == true {
+                    return
+                }
                 self.dismissFromOutsideClick()
             }
         }
@@ -223,7 +235,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
 
     private func togglePinned() {
         isPinned.toggle()
-        contentView?.setPinned(isPinned)
+        pinWindow?.setPinned(isPinned)
         applyControlVisibility()
     }
 
@@ -239,6 +251,8 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         resultWindow = nil
         statusWindow?.close()
         statusWindow = nil
+        pinWindow?.close()
+        pinWindow = nil
         saveWindow?.close()
         saveWindow = nil
         contentView = nil
@@ -274,6 +288,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     func windowDidMove(_ notification: Notification) {
         guard let resultWindow else { return }
         statusWindow?.updateAnchorRect(resultWindow.frame)
+        pinWindow?.updateAnchorRect(resultWindow.frame)
         if let statusWindow {
             saveWindow?.updateStatusFrame(statusWindow.frame)
         }
@@ -359,6 +374,78 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         }
         saveWindow = window
         window.orderFrontRegardless()
+    }
+}
+
+private final class OverlayPinWindow: NSPanel {
+    var onTogglePin: (() -> Void)?
+
+    private var anchorRect: CGRect
+    private let pinButton = OverlayPinButton(frame: CGRect(x: 0, y: 0, width: 28, height: 28))
+
+    init(anchorRect: CGRect) {
+        self.anchorRect = anchorRect
+        super.init(
+            contentRect: Self.frame(for: anchorRect),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        level = OverlayWindow.controlLevel
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
+        animationBehavior = .none
+        isReleasedWhenClosed = false
+        collectionBehavior = OverlayWindow.fullscreenOverlayBehavior
+        pinButton.toolTip = "钉住浮框"
+        pinButton.onClick = { [weak self] in self?.onTogglePin?() }
+        contentView = pinButton
+    }
+
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+
+    func setPinned(_ pinned: Bool) {
+        pinButton.isPinned = pinned
+    }
+
+    func setScreenshot(_ screenshot: CGImage) {
+        let sampleRect = CGRect(
+            x: max(0, CGFloat(screenshot.width) - 36),
+            y: 4,
+            width: min(36, CGFloat(screenshot.width)),
+            height: min(36, CGFloat(screenshot.height))
+        )
+        pinButton.usesDarkSymbol = OverlayPinAppearance.usesDarkSymbol(
+            backgroundLuminance: screenshot.averageLuminance(in: sampleRect)
+        )
+    }
+
+    func updateAnchorRect(_ rect: CGRect) {
+        anchorRect = rect
+        setFrame(Self.frame(for: rect), display: true)
+    }
+
+    private static func frame(for anchorRect: CGRect) -> CGRect {
+        let size = CGSize(width: 28, height: 28)
+        let gap: CGFloat = 8
+        let screenFrame = NSScreen.screens.first { $0.frame.intersects(anchorRect) }?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+            ?? anchorRect
+        let candidates = [
+            CGRect(x: anchorRect.maxX + gap, y: anchorRect.maxY - size.height, width: size.width, height: size.height),
+            CGRect(x: anchorRect.minX - gap - size.width, y: anchorRect.maxY - size.height, width: size.width, height: size.height),
+            CGRect(x: anchorRect.maxX - size.width, y: anchorRect.maxY + gap, width: size.width, height: size.height),
+            CGRect(x: anchorRect.maxX - size.width, y: anchorRect.minY - gap - size.height, width: size.width, height: size.height)
+        ]
+        let safeFrame = screenFrame.insetBy(dx: 8, dy: 8)
+        return candidates.first(where: { safeFrame.contains($0) }) ?? CGRect(
+            x: min(max(anchorRect.maxX + gap, safeFrame.minX), safeFrame.maxX - size.width),
+            y: min(max(anchorRect.maxY - size.height, safeFrame.minY), safeFrame.maxY - size.height),
+            width: size.width,
+            height: size.height
+        )
     }
 }
 
@@ -802,14 +889,12 @@ private final class OverlayBackdropView: NSView {
 }
 
 final class OverlayContentView: NSView {
-    var onTogglePin: (() -> Void)?
     var screenshot: CGImage? {
-        didSet { updatePinContrast() }
+        didSet { needsDisplay = true }
     }
     var displayScale: CGFloat = 1.0
     var translatedBlocks: [TranslatedBlock] = []
     private var displayMode: OverlayDisplayMode = .translation
-    private let pinButton = OverlayPinButton(frame: CGRect(x: 0, y: 0, width: 24, height: 24))
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -829,10 +914,6 @@ final class OverlayContentView: NSView {
         needsDisplay = true
     }
 
-    func setPinned(_ pinned: Bool) {
-        pinButton.isPinned = pinned
-    }
-
     fileprivate func setDisplayMode(_ mode: OverlayDisplayMode) {
         displayMode = mode
         needsDisplay = true
@@ -841,30 +922,10 @@ final class OverlayContentView: NSView {
     private func setupControls() {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
-        pinButton.toolTip = "钉住浮框"
-        pinButton.onClick = { [weak self] in self?.onTogglePin?() }
-        addSubview(pinButton)
     }
 
     override func layout() {
         super.layout()
-        pinButton.frame = CGRect(x: max(4, bounds.maxX - 28), y: 4, width: 24, height: 24)
-        updatePinContrast()
-    }
-
-    private func updatePinContrast() {
-        guard let screenshot, bounds.width > 0, bounds.height > 0 else { return }
-        let scaleX = CGFloat(screenshot.width) / bounds.width
-        let scaleY = CGFloat(screenshot.height) / bounds.height
-        let sampleRect = CGRect(
-            x: max(0, CGFloat(screenshot.width) - 28 * scaleX),
-            y: max(0, 4 * scaleY),
-            width: min(CGFloat(screenshot.width), 24 * scaleX),
-            height: min(CGFloat(screenshot.height), 24 * scaleY)
-        ).integral
-        pinButton.usesDarkSymbol = OverlayPinAppearance.usesDarkSymbol(
-            backgroundLuminance: screenshot.averageLuminance(in: sampleRect)
-        )
     }
 
     override func draw(_ dirtyRect: NSRect) {

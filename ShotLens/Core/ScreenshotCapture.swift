@@ -7,6 +7,9 @@ import ScreenCaptureKit
 struct CapturedScreenshot {
     let image: CGImage
     let fileURL: URL
+    /// 用户实际框选区域在裁剪图中的像素坐标。OCR 可使用外围上下文，
+    /// 但最终只接纳与该区域相交的文字。
+    let userSelectionRectInImage: CGRect
 }
 
 struct FrozenScreenshot {
@@ -44,7 +47,11 @@ struct ScreenshotCapture {
         )
     }
 
-    func crop(frozenSnapshot: FrozenScreenshot, selection rect: CGRect) throws -> CapturedScreenshot? {
+    func crop(
+        frozenSnapshot: FrozenScreenshot,
+        selection rect: CGRect,
+        userSelection: CGRect? = nil
+    ) throws -> CapturedScreenshot? {
         let scaleX = CGFloat(frozenSnapshot.image.width) / max(frozenSnapshot.screenRect.width, 1)
         let scaleY = CGFloat(frozenSnapshot.image.height) / max(frozenSnapshot.screenRect.height, 1)
         let minX = max(0, floor((rect.minX - frozenSnapshot.screenRect.minX) * scaleX))
@@ -75,7 +82,19 @@ struct ScreenshotCapture {
         let normalizedImage = normalizedCopy(of: croppedImage) ?? croppedImage
         let outputURL = temporaryPNGURL()
         try writePNG(normalizedImage, to: outputURL)
-        return CapturedScreenshot(image: normalizedImage, fileURL: outputURL)
+        let selectedRect = userSelection ?? rect
+        let userRectInImage = CGRect(
+            x: (selectedRect.minX - rect.minX) * scaleX,
+            y: (rect.maxY - selectedRect.maxY) * scaleY,
+            width: selectedRect.width * scaleX,
+            height: selectedRect.height * scaleY
+        ).intersection(CGRect(x: 0, y: 0, width: cropRect.width, height: cropRect.height))
+
+        return CapturedScreenshot(
+            image: normalizedImage,
+            fileURL: outputURL,
+            userSelectionRectInImage: userRectInImage
+        )
     }
 
     private func temporaryPNGURL() -> URL {
@@ -183,6 +202,32 @@ struct ScreenshotCapture {
             throw ScreenshotCaptureError.missingOutput(path: url.path, stderr: "PNG 写入失败")
         }
     }
+}
+
+enum SelectionGeometry {
+    /// 给 OCR 留出字形上下文，但保持最终归属仍由用户原始框选决定。
+    static func expandedRect(for selection: CGRect, within screenRect: CGRect) -> CGRect {
+        let shortestSide = min(selection.width, selection.height)
+        let padding = min(24, max(8, shortestSide * 0.35))
+        return selection
+            .insetBy(dx: -padding, dy: -padding)
+            .intersection(screenRect)
+    }
+
+    static func shouldInclude(_ candidate: CGRect, in userSelection: CGRect) -> Bool {
+        guard !candidate.isNull, candidate.width > 0, candidate.height > 0 else { return false }
+        let intersection = candidate.intersection(userSelection)
+        guard !intersection.isNull else { return false }
+
+        let candidateArea = max(candidate.width * candidate.height, 1)
+        let overlapRatio = intersection.width * intersection.height / candidateArea
+        let centerInside = userSelection.insetBy(dx: -max(2, candidate.height * 0.35), dy: -max(2, candidate.height * 0.35)).contains(candidate.mid)
+        return overlapRatio >= 0.18 || centerInside
+    }
+}
+
+private extension CGRect {
+    var mid: CGPoint { CGPoint(x: midX, y: midY) }
 }
 
 private enum ScreenshotCaptureError: LocalizedError {

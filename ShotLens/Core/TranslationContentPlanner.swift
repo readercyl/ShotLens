@@ -152,7 +152,7 @@ private struct FlowGroup {
     }
 }
 
-/// 每个视觉语义块只产生一个翻译项；中英文、数字和标点作为完整上下文交给翻译器。
+/// OCR 已在本地拆出英文片段；每个视觉语义块只产生一个英文翻译项。
 struct TranslationContentPlan {
     private struct BlockPlan {
         let original: TextBlock
