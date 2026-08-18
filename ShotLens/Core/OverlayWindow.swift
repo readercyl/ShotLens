@@ -130,6 +130,11 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         self.pinWindow = pinWindow
         self.contentView = contentView
 
+        // 控件保持独立窗口，便于 pin 单独命中和隐藏；挂到结果窗后由 AppKit
+        // 在同一移动事务中同步跟随，避免 windowDidMove 逐个 setFrame 造成滞后。
+        window.addChildWindow(toolbarWindow, ordered: .above)
+        window.addChildWindow(pinWindow, ordered: .above)
+
         backdropWindows.forEach { $0.orderFrontRegardless() }
         window.orderFrontRegardless()
         toolbarWindow.orderFrontRegardless()
@@ -256,6 +261,10 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        if let resultWindow {
+            if let toolbarWindow { resultWindow.removeChildWindow(toolbarWindow) }
+            if let pinWindow { resultWindow.removeChildWindow(pinWindow) }
+        }
         resultWindow = nil
         toolbarWindow?.close()
         toolbarWindow = nil
@@ -296,9 +305,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     }
 
     func windowDidMove(_ notification: Notification) {
-        guard let resultWindow else { return }
-        toolbarWindow?.followAnchorRect(resultWindow.frame)
-        pinWindow?.followAnchorRect(resultWindow.frame)
+        // 工具条和 pin 已作为 child window 由 AppKit 同步移动。
     }
 
     @MainActor
@@ -434,24 +441,6 @@ private final class OverlayToolbarWindow: NSPanel {
         toolbarView.showFeedback(message)
     }
 
-    func updateAnchorRect(_ rect: CGRect) {
-        anchorRect = rect
-        updateFrame()
-    }
-
-    func followAnchorRect(_ rect: CGRect) {
-        let delta = CGPoint(x: rect.minX - anchorRect.minX, y: rect.minY - anchorRect.minY)
-        anchorRect = rect
-        var origin = CGPoint(x: frame.minX + delta.x, y: frame.minY + delta.y)
-        let screenFrame = NSScreen.screens.first { $0.frame.intersects(rect) }?.visibleFrame
-            ?? NSScreen.main?.visibleFrame
-            ?? rect
-        let safeFrame = screenFrame.insetBy(dx: 8, dy: 8)
-        origin.x = min(max(origin.x, safeFrame.minX), safeFrame.maxX - frame.width)
-        origin.y = min(max(origin.y, safeFrame.minY), safeFrame.maxY - frame.height)
-        setFrameOrigin(origin)
-    }
-
     private func updateFrame() {
         let size = toolbarView.preferredSize
         toolbarView.frame = CGRect(origin: .zero, size: size)
@@ -476,6 +465,29 @@ private final class OverlayToolbarWindow: NSPanel {
             width: size.width,
             height: size.height
         )
+    }
+}
+
+private final class OverlayToolbarStatusLabel: NSView {
+    var text = "" { didSet { needsDisplay = true } }
+    var font = NSFont.systemFont(ofSize: 12, weight: .medium) { didSet { needsDisplay = true } }
+    var textColor: NSColor = .labelColor { didSet { needsDisplay = true } }
+
+    override var isFlipped: Bool { true }
+    override var isOpaque: Bool { false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard !text.isEmpty else { return }
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: textColor
+        ]
+        let size = (text as NSString).size(withAttributes: attributes)
+        let point = CGPoint(
+            x: bounds.midX - size.width / 2,
+            y: bounds.midY - size.height / 2
+        )
+        (text as NSString).draw(at: point, withAttributes: attributes)
     }
 }
 
@@ -505,7 +517,7 @@ private final class OverlayToolbarView: NSView {
     private let copyButton = OverlayToolbarIconButton(symbolName: "doc.on.doc", label: "复制译文")
     private let retranslateButton = OverlayToolbarIconButton(symbolName: "arrow.clockwise", label: "重新翻译")
     private let copyImageButton = OverlayToolbarIconButton(symbolName: "photo.on.rectangle", label: "复制截图")
-    private let messageLabel = NSTextField(labelWithString: "")
+    private let messageLabel = OverlayToolbarStatusLabel()
     private var feedbackReset: DispatchWorkItem?
 
     override var isFlipped: Bool { true }
@@ -518,11 +530,6 @@ private final class OverlayToolbarView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        messageLabel.font = .systemFont(ofSize: 12, weight: .medium)
-        messageLabel.textColor = .labelColor
-        messageLabel.alignment = .center
-        messageLabel.lineBreakMode = .byTruncatingTail
-        messageLabel.maximumNumberOfLines = 1
         modeButton.onClick = onToggleMode
         copyButton.onClick = onCopyText
         retranslateButton.onClick = { [weak self] in self?.performRetranslateOrRetry() }
@@ -610,21 +617,21 @@ private final class OverlayToolbarView: NSView {
 
         switch state {
         case .success(_, let message):
-            messageLabel.stringValue = message == "翻译完成" ? "已翻译" : message
+            messageLabel.text = message == "翻译完成" ? "已翻译" : message
             modeButton.isEnabled = true
             copyButton.isEnabled = true
             retranslateButton.isEnabled = true
             copyImageButton.isEnabled = true
             retranslateButton.label = "重新翻译"
         case .processing(let message):
-            messageLabel.stringValue = message
+            messageLabel.text = message
             modeButton.isEnabled = false
             copyButton.isEnabled = false
             retranslateButton.isEnabled = false
             copyImageButton.isEnabled = false
             retranslateButton.label = "重新翻译"
         case .failure(let message):
-            messageLabel.stringValue = message
+            messageLabel.text = message
             modeButton.isEnabled = false
             copyButton.isEnabled = false
             retranslateButton.isEnabled = true
@@ -796,23 +803,6 @@ private final class OverlayPinWindow: NSPanel {
         pinButton.usesDarkSymbol = OverlayPinAppearance.usesDarkSymbol(
             backgroundLuminance: screenshot.averageLuminance(in: sampleRect)
         )
-    }
-
-    func updateAnchorRect(_ rect: CGRect) {
-        followAnchorRect(rect)
-    }
-
-    func followAnchorRect(_ rect: CGRect) {
-        let delta = CGPoint(x: rect.minX - anchorRect.minX, y: rect.minY - anchorRect.minY)
-        anchorRect = rect
-        var origin = CGPoint(x: frame.minX + delta.x, y: frame.minY + delta.y)
-        let screenFrame = NSScreen.screens.first { $0.frame.intersects(rect) }?.visibleFrame
-            ?? NSScreen.main?.visibleFrame
-            ?? rect
-        let safeFrame = screenFrame.insetBy(dx: 8, dy: 8)
-        origin.x = min(max(origin.x, safeFrame.minX), safeFrame.maxX - frame.width)
-        origin.y = min(max(origin.y, safeFrame.minY), safeFrame.maxY - frame.height)
-        setFrameOrigin(origin)
     }
 
     private static func frame(for anchorRect: CGRect) -> CGRect {

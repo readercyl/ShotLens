@@ -53,6 +53,13 @@ fi
 rg -n 'OverlayPinButton' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'OverlayToolbarWindow' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'OverlayToolbarView' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'window\.addChildWindow\(toolbarWindow, ordered: \.above\)' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'window\.addChildWindow\(pinWindow, ordered: \.above\)' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'OverlayToolbarStatusLabel' "$OVERLAY_WINDOW" >/dev/null
+if rg -n 'followAnchorRect' "$OVERLAY_WINDOW" >/dev/null; then
+  echo "Child windows must follow the result window through AppKit, not manual per-frame repositioning." >&2
+  exit 1
+fi
 rg -n -F 'OverlayToolbarIconButton(symbolName: "eye", label: "显示原文")' "$OVERLAY_WINDOW" >/dev/null
 rg -n -F 'OverlayToolbarIconButton(symbolName: "doc.on.doc", label: "复制译文")' "$OVERLAY_WINDOW" >/dev/null
 rg -n -F 'OverlayToolbarIconButton(symbolName: "arrow.clockwise", label: "重新翻译")' "$OVERLAY_WINDOW" >/dev/null
