@@ -5,6 +5,7 @@ import Foundation
 struct TranslationContentPlannerSmoke {
     static func main() throws {
         try assertChineseOnlyIsExcluded()
+        try assertChineseOnlyBlocksRemainInMixedRenderDocument()
         try assertMixedTextOnlyKeepsEnglishRuns()
         try assertEnglishOnlyStaysSingleItem()
         try assertIsolatedEnglishPhraseStaysLocal()
@@ -23,8 +24,19 @@ struct TranslationContentPlannerSmoke {
     private static func assertChineseOnlyIsExcluded() throws {
         let plan = TranslationContentPlan.make(from: [block("已经是中文")])
         guard plan.sourceTexts.isEmpty,
-              plan.applying([])?.isEmpty == true else {
-            throw TestFailure("Chinese-only blocks must not be sent or covered")
+              plan.applying([])?.map(\.translatedText) == ["已经是中文"] else {
+            throw TestFailure("Chinese-only blocks must not be sent, but must remain in the render document")
+        }
+    }
+
+    private static func assertChineseOnlyBlocksRemainInMixedRenderDocument() throws {
+        let plan = TranslationContentPlan.make(from: [
+            block("智能体指数已更新", x: 10, y: 10),
+            block("Intelligence Index", x: 10, y: 50)
+        ])
+        guard plan.sourceTexts == ["Intelligence Index"],
+              plan.applying(["智能体指数"])?.map(\.translatedText) == ["智能体指数已更新", "智能体指数"] else {
+            throw TestFailure("Mixed render documents must retain Chinese-only blocks without sending them to the API")
         }
     }
 

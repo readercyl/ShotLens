@@ -160,7 +160,7 @@ private struct FlowGroup {
 struct TranslationContentPlan {
     private struct BlockPlan {
         let original: TextBlock
-        let translationIndex: Int
+        let translationIndex: Int?
     }
 
     let sourceTexts: [String]
@@ -169,11 +169,18 @@ struct TranslationContentPlan {
     static func make(from blocks: [TextBlock]) -> TranslationContentPlan {
         var sourceTexts: [String] = []
         var blockPlans: [BlockPlan] = []
-        for block in blocks where block.text.containsTranslatableLanguage {
+        for block in blocks {
             let source = block.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            let index = sourceTexts.count
-            sourceTexts.append(source)
-            blockPlans.append(BlockPlan(original: block, translationIndex: index))
+            guard !source.isEmpty else { continue }
+            if block.text.containsTranslatableLanguage {
+                let index = sourceTexts.count
+                sourceTexts.append(source)
+                blockPlans.append(BlockPlan(original: block, translationIndex: index))
+            } else {
+                // 中文、纯数字和符号不发送给模型，但必须进入结果文档，
+                // 否则整窗重排时它们会继续留在底层截图，造成重复和覆盖。
+                blockPlans.append(BlockPlan(original: block, translationIndex: nil))
+            }
         }
         return TranslationContentPlan(sourceTexts: sourceTexts, blockPlans: blockPlans)
     }
@@ -185,8 +192,11 @@ struct TranslationContentPlan {
     func applyingAvailable(_ translations: [String?]) -> [TranslatedBlock]? {
         guard translations.count == sourceTexts.count else { return nil }
         return blockPlans.compactMap { plan in
-            guard let translation = translations[plan.translationIndex] else { return nil }
-            return TranslatedBlock(original: plan.original, translatedText: translation)
+            if let translationIndex = plan.translationIndex {
+                guard let translation = translations[translationIndex] else { return nil }
+                return TranslatedBlock(original: plan.original, translatedText: translation)
+            }
+            return TranslatedBlock(original: plan.original, translatedText: plan.original.text)
         }
     }
 }
