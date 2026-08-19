@@ -1340,9 +1340,74 @@ struct OverlayTranslationFlow {
     }
 }
 
+enum OverlayTranslationRenderMode: Equatable {
+    case anchored
+    case structured
+}
+
 /// 将“翻译单元”和“最终排版区域”分离。
 /// OCR 语义块仍然保留用于上下文、阅读顺序和背景恢复，但译文不再被原始矩形锁死。
 enum OverlayTranslationLayout {
+    static func renderMode(
+        for items: [OverlayTranslationLayoutItem],
+        canvas: CGRect
+    ) -> OverlayTranslationRenderMode {
+        guard !items.isEmpty, canvas.width > 0, canvas.height > 0 else { return .anchored }
+        let translatedItems = items.filter {
+            $0.block.translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                != $0.block.original.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard !translatedItems.isEmpty else { return .anchored }
+        let totalCharacters = translatedItems.reduce(0) { $0 + $1.block.translatedText.count }
+        let longestBlock = translatedItems.map { $0.block.translatedText.count }.max() ?? 0
+        let verticalSpan = (translatedItems.map(\.displayRect.maxY).max() ?? 0)
+            - (translatedItems.map(\.displayRect.minY).min() ?? 0)
+        let hasDenseReadingColumn = translatedItems.count >= 4
+            && verticalSpan >= canvas.height * 0.45
+            && translatedItems.map(\.displayRect.minX).max()! - translatedItems.map(\.displayRect.minX).min()! <= max(36, canvas.width * 0.08)
+
+        if longestBlock >= 240
+            || totalCharacters >= 520
+            || (hasDenseReadingColumn && totalCharacters >= 320) {
+            return .structured
+        }
+        return .anchored
+    }
+
+    static func anchoredRects(
+        for items: [OverlayTranslationLayoutItem],
+        canvas: CGRect,
+        padding: CGFloat = 16
+    ) -> [CGRect] {
+        let contentRect = canvas.insetBy(
+            dx: min(max(0, padding), max(0, canvas.width / 2 - 1)),
+            dy: min(max(0, padding), max(0, canvas.height / 2 - 1))
+        )
+        let ordered = items.sorted(by: readingOrder)
+        return ordered.map { item in
+            let source = item.displayRect
+            let sameRow = ordered
+                .filter {
+                    abs($0.displayRect.midY - source.midY) <= max(10, source.height * 0.8)
+                        && $0.displayRect.minX > source.minX
+                }
+                .min { $0.displayRect.minX < $1.displayRect.minX }
+            let right = sameRow.map { $0.displayRect.minX - 8 } ?? contentRect.maxX
+            let nextRow = ordered
+                .filter { $0.displayRect.minY > source.maxY + max(4, source.height * 0.25) }
+                .min { $0.displayRect.minY < $1.displayRect.minY }
+            let bottom = nextRow.map { $0.displayRect.minY - 8 } ?? contentRect.maxY
+            let left = max(contentRect.minX, source.minX)
+            let top = max(contentRect.minY, source.minY)
+            return CGRect(
+                x: left,
+                y: top,
+                width: max(2, min(contentRect.maxX, right) - left),
+                height: max(2, min(contentRect.maxY, bottom) - top)
+            )
+        }
+    }
+
     static func makeFlows(
         items: [OverlayTranslationLayoutItem],
         canvas: CGRect,
@@ -1670,21 +1735,31 @@ final class OverlayContentView: NSView {
             guard displayRect.width > 0, displayRect.height > 0 else { return nil }
             return OverlayTranslationLayoutItem(block: block, displayRect: displayRect)
         }
+        guard !layoutItems.isEmpty else { return }
+
+        for item in layoutItems {
+            restoreBackground(
+                for: item.block,
+                screenshotSize: screenshotSize,
+                displayRect: item.displayRect
+            )
+        }
+
+        let renderMode = OverlayTranslationLayout.renderMode(for: layoutItems, canvas: bounds)
+        if renderMode == .anchored {
+            drawAnchoredTranslations(
+                layoutItems,
+                canvas: bounds,
+                paragraphStyle: paragraphStyle
+            )
+            return
+        }
+
         let flows = OverlayTranslationLayout.makeFlows(
             items: layoutItems,
             canvas: bounds
         )
         guard !flows.isEmpty else { return }
-
-        for flow in flows {
-            for item in flow.items {
-                restoreBackground(
-                    for: item.block,
-                    screenshotSize: screenshotSize,
-                    displayRect: item.displayRect
-                )
-            }
-        }
 
         for flow in flows {
             let text = flow.text
@@ -1715,6 +1790,43 @@ final class OverlayContentView: NSView {
             ]
             (text as NSString).draw(
                 in: flow.layoutRect,
+                withAttributes: attrs
+            )
+        }
+    }
+
+    private func drawAnchoredTranslations(
+        _ items: [OverlayTranslationLayoutItem],
+        canvas: CGRect,
+        paragraphStyle: NSParagraphStyle
+    ) {
+        let rects = OverlayTranslationLayout.anchoredRects(for: items, canvas: canvas)
+        let ordered = items.sorted {
+            if abs($0.displayRect.minY - $1.displayRect.minY) > 6 {
+                return $0.displayRect.minY < $1.displayRect.minY
+            }
+            return $0.displayRect.minX < $1.displayRect.minX
+        }
+        for (item, rect) in zip(ordered, rects) {
+            let targetSize = targetFontSize(for: [item])
+            let measurement = OverlayTranslationTextFit.measure(
+                text: item.block.translatedText,
+                in: rect,
+                targetSize: targetSize,
+                paragraphStyle: paragraphStyle,
+                minimumSize: 0.25
+            )
+            let backgroundColor = sampledBackgroundColor(forPixelRect: item.block.original.boundingBox)
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: measurement.font,
+                .foregroundColor: resolvedTextColor(
+                    sourceStyle: item.block.original.visualStyle,
+                    backgroundColor: backgroundColor
+                ),
+                .paragraphStyle: paragraphStyle
+            ]
+            (item.block.translatedText as NSString).draw(
+                in: rect,
                 withAttributes: attrs
             )
         }

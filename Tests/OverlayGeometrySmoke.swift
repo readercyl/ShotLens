@@ -17,6 +17,8 @@ struct OverlayGeometrySmoke {
         try assertSemanticBlocksShareFullCanvasFlow()
         try assertSeparatedColumnsKeepIndependentFlows()
         try assertLongTranslationIsMeasuredAgainstWholeCanvas()
+        try assertShortContentStaysAnchored()
+        try assertLongContentUsesStructuredReflow()
 
         print("Overlay geometry smoke test passed.")
     }
@@ -76,6 +78,45 @@ struct OverlayGeometrySmoke {
               measurement.requiredSize.height <= measurement.availableSize.height + 0.75,
               measurement.font.pointSize <= 22 else {
             throw TestFailure("Long translation must be measured and fit before drawing: \(measurement)")
+        }
+    }
+
+    private static func assertShortContentStaysAnchored() throws {
+        let items = [
+            OverlayTranslationLayoutItem(
+                block: translatedBlock("标题", rect: CGRect(x: 24, y: 42, width: 160, height: 28)),
+                displayRect: CGRect(x: 24, y: 42, width: 160, height: 28)
+            ),
+            OverlayTranslationLayoutItem(
+                block: translatedBlock("标签", rect: CGRect(x: 720, y: 42, width: 120, height: 28)),
+                displayRect: CGRect(x: 720, y: 42, width: 120, height: 28)
+            )
+        ]
+        let canvas = CGRect(x: 0, y: 0, width: 1_000, height: 400)
+        guard OverlayTranslationLayout.renderMode(for: items, canvas: canvas) == .anchored else {
+            throw TestFailure("Short labels must keep the anchored rendering mode")
+        }
+        let rects = OverlayTranslationLayout.anchoredRects(for: items, canvas: canvas)
+        guard rects.count == 2,
+              rects[0].minY == 42,
+              rects[1].minY == 42,
+              rects[0].maxX < rects[1].minX else {
+            throw TestFailure("Short content must preserve its source row and columns: \(rects)")
+        }
+    }
+
+    private static func assertLongContentUsesStructuredReflow() throws {
+        let longText = String(repeating: "这是一段需要整体排版的长文本。", count: 30)
+        let item = OverlayTranslationLayoutItem(
+            block: translatedBlock(longText, rect: CGRect(x: 24, y: 120, width: 900, height: 80)),
+            displayRect: CGRect(x: 24, y: 120, width: 900, height: 80)
+        )
+        let mode = OverlayTranslationLayout.renderMode(
+            for: [item],
+            canvas: CGRect(x: 0, y: 0, width: 1_000, height: 400)
+        )
+        guard mode == .structured else {
+            throw TestFailure("Long paragraphs must use structured reflow")
         }
     }
 
