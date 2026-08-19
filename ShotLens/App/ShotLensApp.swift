@@ -498,13 +498,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ShotLensLogger.log("语义分组完成，\(displayTextBlocks.count) 个 OCR 行合并为 \(semanticBlocks.count) 个文本块")
         let contentPlan = TranslationContentPlan.make(from: semanticBlocks)
         guard !contentPlan.sourceTexts.isEmpty else {
-            ShotLensLogger.log("选区内没有需要翻译的英文")
-            overlay?.setMessage("未识别到英文")
+            ShotLensLogger.log("选区内没有需要翻译的外语")
+            overlay?.setMessage("未识别到外语")
             return
         }
 
         configureTranslationRetry(
-            contentPlan,
+            captured: captured,
+            displayPixelSize: displayPixelSize,
             overlay: overlay,
             settings: settings
         )
@@ -512,19 +513,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureTranslationRetry(
-        _ contentPlan: TranslationContentPlan,
+        captured: CapturedScreenshot,
+        displayPixelSize: CGSize,
         overlay: OverlayWindow?,
         settings: TranslationSettings
     ) {
         let retry = { [weak self, weak overlay] in
             guard let self else { return }
-            ShotLensLogger.log("复用 OCR 结果重新翻译")
+            ShotLensLogger.log("重新翻译：从现有框选截图重新执行 OCR 和翻译")
             Task {
-                await self.translateRecognized(
-                    contentPlan,
+                await self.translate(
+                    captured: captured,
+                    displayPixelSize: displayPixelSize,
                     overlay: overlay,
-                    settings: settings,
-                    pipelineStartedAt: Date()
+                    settings: settings
                 )
             }
         }
