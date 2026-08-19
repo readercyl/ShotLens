@@ -1298,6 +1298,289 @@ private final class OverlayBackdropView: NSView {
     }
 }
 
+struct OverlayTranslationLayoutItem {
+    let block: TranslatedBlock
+    let displayRect: CGRect
+}
+
+struct OverlayTranslationFlow {
+    let items: [OverlayTranslationLayoutItem]
+    let sourceBounds: CGRect
+    let layoutRect: CGRect
+
+    var text: String {
+        items
+            .map { $0.block.translatedText.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+}
+
+/// 将“翻译单元”和“最终排版区域”分离。
+/// OCR 语义块仍然保留用于上下文、阅读顺序和背景恢复，但译文不再被原始矩形锁死。
+enum OverlayTranslationLayout {
+    static func makeFlows(
+        items: [OverlayTranslationLayoutItem],
+        canvas: CGRect,
+        padding: CGFloat = 16
+    ) -> [OverlayTranslationFlow] {
+        let readableItems = items
+            .filter { $0.displayRect.width > 0 && $0.displayRect.height > 0 && !$0.block.translatedText.isEmpty }
+            .sorted(by: readingOrder)
+        guard !readableItems.isEmpty, canvas.width > 0, canvas.height > 0 else { return [] }
+
+        var regions: [Region] = []
+        for item in readableItems {
+            if let index = regions.indices.first(where: { regions[$0].accepts(item.displayRect, canvas: canvas) }) {
+                regions[index].append(item)
+            } else {
+                regions.append(Region(item: item))
+            }
+        }
+
+        let contentRect = canvas.insetBy(
+            dx: min(max(0, padding), max(0, canvas.width / 2 - 1)),
+            dy: min(max(0, padding), max(0, canvas.height / 2 - 1))
+        )
+        let orderedRegions = regions.sorted { lhs, rhs in
+            if abs(lhs.sourceBounds.minY - rhs.sourceBounds.minY) > 8 {
+                return lhs.sourceBounds.minY < rhs.sourceBounds.minY
+            }
+            return lhs.sourceBounds.minX < rhs.sourceBounds.minX
+        }
+        let bands = makeBands(from: orderedRegions)
+        var flows: [OverlayTranslationFlow] = []
+        for bandIndex in bands.indices {
+            let band = bands[bandIndex]
+            let top = bandIndex == bands.startIndex
+                ? contentRect.minY
+                : verticalBoundary(between: bands[bandIndex - 1].sourceBounds, and: band.sourceBounds)
+            let bottom = bandIndex == bands.index(before: bands.endIndex)
+                ? contentRect.maxY
+                : verticalBoundary(between: band.sourceBounds, and: bands[bandIndex + 1].sourceBounds)
+            let bandRect = CGRect(
+                x: contentRect.minX,
+                y: min(top, bottom),
+                width: contentRect.width,
+                height: max(2, abs(bottom - top))
+            )
+            let horizontalRegions = band.regions.sorted { $0.sourceBounds.minX < $1.sourceBounds.minX }
+            let usesFullWidth = horizontalRegions.count == 1 || horizontalRegions.contains { $0.isWide(canvas: canvas) }
+            let horizontalSlots = usesFullWidth
+                ? horizontalRegions.map { _ in bandRect }
+                : slots(for: horizontalRegions, in: bandRect)
+            for (index, region) in horizontalRegions.enumerated() {
+                flows.append(OverlayTranslationFlow(
+                    items: region.items.sorted(by: readingOrder),
+                    sourceBounds: region.sourceBounds,
+                    layoutRect: horizontalSlots[index]
+                ))
+            }
+        }
+        return flows
+    }
+
+    private static func readingOrder(
+        _ lhs: OverlayTranslationLayoutItem,
+        _ rhs: OverlayTranslationLayoutItem
+    ) -> Bool {
+        if abs(lhs.displayRect.minY - rhs.displayRect.minY) > 6 {
+            return lhs.displayRect.minY < rhs.displayRect.minY
+        }
+        return lhs.displayRect.minX < rhs.displayRect.minX
+    }
+
+    private static func horizontalBoundary(
+        between lhs: CGRect,
+        and rhs: CGRect
+    ) -> CGFloat {
+        if lhs.maxX <= rhs.minX {
+            return (lhs.maxX + rhs.minX) / 2
+        }
+        return (lhs.midX + rhs.midX) / 2
+    }
+
+    private static func verticalBoundary(
+        between lhs: CGRect,
+        and rhs: CGRect
+    ) -> CGFloat {
+        if lhs.maxY <= rhs.minY {
+            return (lhs.maxY + rhs.minY) / 2
+        }
+        return (lhs.midY + rhs.midY) / 2
+    }
+
+    private static func slots(
+        for regions: [Region],
+        in rect: CGRect
+    ) -> [CGRect] {
+        regions.indices.map { index in
+            let left: CGFloat = index == regions.startIndex
+                ? rect.minX
+                : horizontalBoundary(
+                    between: regions[index - 1].sourceBounds,
+                    and: regions[index].sourceBounds
+                )
+            let right: CGFloat = index == regions.index(before: regions.endIndex)
+                ? rect.maxX
+                : horizontalBoundary(
+                    between: regions[index].sourceBounds,
+                    and: regions[index + 1].sourceBounds
+                )
+            let safeLeft = max(rect.minX, min(left + 8, rect.maxX - 2))
+            let safeRight = min(rect.maxX, max(right - 8, safeLeft + 2))
+            return CGRect(
+                x: safeLeft,
+                y: rect.minY,
+                width: max(2, safeRight - safeLeft),
+                height: rect.height
+            )
+        }
+    }
+
+    private static func makeBands(from regions: [Region]) -> [Band] {
+        var bands: [Band] = []
+        for region in regions {
+            if let index = bands.indices.last,
+               bands[index].canAppend(region) {
+                bands[index].append(region)
+            } else {
+                bands.append(Band(region: region))
+            }
+        }
+        return bands
+    }
+
+    private struct Region {
+        let id = UUID()
+        var items: [OverlayTranslationLayoutItem]
+        var sourceBounds: CGRect
+        var referenceLeft: CGFloat
+        var referenceHeight: CGFloat
+        var maxItemWidth: CGFloat
+
+        init(item: OverlayTranslationLayoutItem) {
+            items = [item]
+            sourceBounds = item.displayRect
+            referenceLeft = item.displayRect.minX
+            referenceHeight = item.displayRect.height
+            maxItemWidth = item.displayRect.width
+        }
+
+        mutating func append(_ item: OverlayTranslationLayoutItem) {
+            items.append(item)
+            sourceBounds = sourceBounds.union(item.displayRect)
+            referenceLeft = (referenceLeft * CGFloat(items.count - 1) + item.displayRect.minX) / CGFloat(items.count)
+            referenceHeight = (referenceHeight * CGFloat(items.count - 1) + item.displayRect.height) / CGFloat(items.count)
+            maxItemWidth = max(maxItemWidth, item.displayRect.width)
+        }
+
+        func isWide(canvas: CGRect) -> Bool {
+            maxItemWidth >= canvas.width * 0.78
+        }
+
+        func accepts(_ rect: CGRect, canvas: CGRect) -> Bool {
+            let tolerance = max(32, referenceHeight * 2)
+            let leftAligned = abs(rect.minX - referenceLeft) <= tolerance
+            let overlap = max(0, min(sourceBounds.maxX, rect.maxX) - max(sourceBounds.minX, rect.minX))
+            let overlapRatio = overlap / max(1, min(sourceBounds.width, rect.width))
+            let wide = isWide(canvas: canvas) || rect.width >= canvas.width * 0.78
+            if wide {
+                let verticalGap = rect.minY > sourceBounds.maxY
+                    ? rect.minY - sourceBounds.maxY
+                    : sourceBounds.minY - rect.maxY
+                let narrowerAfterWide = rect.width < canvas.width * 0.6
+                    && verticalGap > max(24, referenceHeight * 2)
+                return leftAligned && !narrowerAfterWide
+            }
+            return leftAligned || overlapRatio >= 0.25
+        }
+    }
+
+    private struct Band {
+        var regions: [Region]
+        var sourceBounds: CGRect
+
+        init(region: Region) {
+            regions = [region]
+            sourceBounds = region.sourceBounds
+        }
+
+        mutating func append(_ region: Region) {
+            regions.append(region)
+            sourceBounds = sourceBounds.union(region.sourceBounds)
+        }
+
+        func canAppend(_ region: Region) -> Bool {
+            let gap = region.sourceBounds.minY >= sourceBounds.maxY
+                ? region.sourceBounds.minY - sourceBounds.maxY
+                : sourceBounds.minY - region.sourceBounds.maxY
+            let referenceHeight = max(1, min(sourceBounds.height, region.sourceBounds.height))
+            return gap <= max(24, referenceHeight * 2)
+        }
+    }
+}
+
+struct OverlayTranslationTextMeasurement {
+    let font: NSFont
+    let requiredSize: CGSize
+    let availableSize: CGSize
+
+    var fits: Bool {
+        requiredSize.width <= availableSize.width + 0.75
+            && requiredSize.height <= availableSize.height + 0.75
+    }
+}
+
+enum OverlayTranslationTextFit {
+    static func measure(
+        text: String,
+        in rect: CGRect,
+        targetSize: CGFloat,
+        paragraphStyle: NSParagraphStyle,
+        minimumSize: CGFloat = 0.25
+    ) -> OverlayTranslationTextMeasurement {
+        let width = max(1, rect.width)
+        let height = max(1, rect.height)
+        var low = max(0.25, minimumSize)
+        var high = max(targetSize, low)
+        var best = low
+
+        func font(_ size: CGFloat) -> NSFont {
+            .systemFont(ofSize: size, weight: .regular)
+        }
+
+        let targetFont = font(targetSize)
+        if text.boundingSize(font: targetFont, width: width, paragraphStyle: paragraphStyle).height <= height + 0.5 {
+            let required = text.boundingSize(font: targetFont, width: width, paragraphStyle: paragraphStyle)
+            return OverlayTranslationTextMeasurement(
+                font: targetFont,
+                requiredSize: required,
+                availableSize: CGSize(width: width, height: height)
+            )
+        }
+
+        while high - low > 0.15 {
+            let size = (low + high) / 2
+            let candidate = font(size)
+            let required = text.boundingSize(font: candidate, width: width, paragraphStyle: paragraphStyle)
+            if required.height <= height + 0.5 {
+                best = size
+                low = size
+            } else {
+                high = size
+            }
+        }
+
+        let fittedFont = font(best)
+        return OverlayTranslationTextMeasurement(
+            font: fittedFont,
+            requiredSize: text.boundingSize(font: fittedFont, width: width, paragraphStyle: paragraphStyle),
+            availableSize: CGSize(width: width, height: height)
+        )
+    }
+}
+
 final class OverlayContentView: NSView {
     var screenshot: CGImage? {
         didSet { needsDisplay = true }
@@ -1354,6 +1637,8 @@ final class OverlayContentView: NSView {
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .left
         paragraphStyle.lineBreakMode = .byCharWrapping
+        paragraphStyle.lineSpacing = 0
+        paragraphStyle.paragraphSpacing = 8
 
         guard let screenshot else { return }
         let screenshotSize = CGSize(width: screenshot.width, height: screenshot.height)
@@ -1365,112 +1650,74 @@ final class OverlayContentView: NSView {
             }
             return lhs.minX < rhs.minX
         }
-        let sourceRects = sortedBlocks.map {
-            OverlayGeometry.displayRect(
-                forPixelRect: $0.original.boundingBox,
+        let layoutItems = sortedBlocks.compactMap { block -> OverlayTranslationLayoutItem? in
+            let displayRect = OverlayGeometry.displayRect(
+                forPixelRect: block.original.boundingBox,
                 screenshotPixelSize: screenshotSize,
                 displayBounds: bounds
             ).intersection(bounds)
+            guard displayRect.width > 0, displayRect.height > 0 else { return nil }
+            return OverlayTranslationLayoutItem(block: block, displayRect: displayRect)
+        }
+        let flows = OverlayTranslationLayout.makeFlows(
+            items: layoutItems,
+            canvas: bounds
+        )
+        guard !flows.isEmpty else { return }
+
+        for flow in flows {
+            for item in flow.items {
+                restoreBackground(
+                    for: item.block,
+                    screenshotSize: screenshotSize,
+                    displayRect: item.displayRect
+                )
+            }
         }
 
-        if shouldReflow(sortedBlocks: sortedBlocks, sourceRects: sourceRects) {
-            drawReflowedTranslations(
-                sortedBlocks: sortedBlocks,
-                sourceRects: sourceRects,
-                screenshotSize: screenshotSize,
-                paragraphStyle: paragraphStyle
+        for flow in flows {
+            let text = flow.text
+            guard !text.isEmpty, flow.layoutRect.width > 0, flow.layoutRect.height > 0 else { continue }
+            let sourceStyle = flow.items.first?.block.original.visualStyle ?? .unknown
+            let targetSize = targetFontSize(for: flow.items)
+            let measurement = OverlayTranslationTextFit.measure(
+                text: text,
+                in: flow.layoutRect,
+                targetSize: targetSize,
+                paragraphStyle: paragraphStyle,
+                minimumSize: 0.25
             )
-            return
-        }
+            if !measurement.fits {
+                ShotLensLogger.log(
+                    String(format: "译文排版仍超出结果窗，字号 %.2f，需 %.1f/可用 %.1f", measurement.font.pointSize, measurement.requiredSize.height, flow.layoutRect.height)
+                )
+            }
 
-        for (index, block) in sortedBlocks.enumerated() {
-            let rect = sourceRects[index]
-            guard rect.width > 0, rect.height > 0 else { continue }
-            let layout = textLayout(
-                for: block.translatedText,
-                baseRect: rect,
-                sourceStyle: block.original.visualStyle
-            )
-
-            restoreBackground(for: block, screenshotSize: screenshotSize, displayRect: rect)
-
-            let backgroundColor = sampledBackgroundColor(forPixelRect: block.original.boundingBox)
-
+            let backgroundColor = sampledBackgroundColor(forPixelRect: flow.items.first?.block.original.boundingBox ?? .zero)
             let attrs: [NSAttributedString.Key: Any] = [
-                .font: layout.font,
+                .font: measurement.font,
                 .foregroundColor: resolvedTextColor(
-                    sourceStyle: block.original.visualStyle,
+                    sourceStyle: sourceStyle,
                     backgroundColor: backgroundColor
                 ),
                 .paragraphStyle: paragraphStyle
             ]
-            (block.translatedText as NSString).draw(
-                in: layout.textRect,
+            (text as NSString).draw(
+                in: flow.layoutRect,
                 withAttributes: attrs
             )
         }
     }
 
-    private func shouldReflow(
-        sortedBlocks: [TranslatedBlock],
-        sourceRects: [CGRect]
-    ) -> Bool {
-        guard !sortedBlocks.isEmpty,
-              sourceRects.count == sortedBlocks.count,
-              sourceRects.allSatisfy({ $0.width > 0 && $0.height > 0 }) else {
-            return false
-        }
-        if sortedBlocks.count == 1 {
-            return textLayout(
-                for: sortedBlocks[0].translatedText,
-                baseRect: sourceRects[0],
-                sourceStyle: sortedBlocks[0].original.visualStyle
-            ).font.pointSize < 10.5
-        }
-        let first = sourceRects[0]
-        let lineHeight = max(1, first.height)
-        let sameFlow = sourceRects.dropFirst().allSatisfy {
-            abs($0.minX - first.minX) <= max(24, lineHeight * 1.5)
-        }
-        guard sameFlow else { return false }
-        return sortedBlocks.enumerated().contains { index, block in
-            textLayout(
-                for: block.translatedText,
-                baseRect: sourceRects[index],
-                sourceStyle: block.original.visualStyle
-            ).font.pointSize < 10.5
-        }
-    }
-
-    private func drawReflowedTranslations(
-        sortedBlocks: [TranslatedBlock],
-        sourceRects: [CGRect],
-        screenshotSize: CGSize,
-        paragraphStyle: NSParagraphStyle
-    ) {
-        guard let first = sortedBlocks.first else { return }
-        for (index, block) in sortedBlocks.enumerated() {
-            restoreBackground(for: block, screenshotSize: screenshotSize, displayRect: sourceRects[index])
-        }
-
-        let flowRect = sourceRects.dropFirst().reduce(sourceRects[0]) { $0.union($1) }
-        let text = sortedBlocks.map(\.translatedText).joined(separator: "\n")
-        let pixelScaleY = screenshot.map { CGFloat($0.height) / max(bounds.height, 1) } ?? max(displayScale, 1)
-        let sourceSizes = sortedBlocks.map { block in
-            block.original.visualStyle.estimatedFontSize > 0
-                ? block.original.visualStyle.estimatedFontSize / max(pixelScaleY, 1)
+    private func targetFontSize(for items: [OverlayTranslationLayoutItem]) -> CGFloat {
+        let pixelScaleY = screenshot.map { CGFloat($0.height) / max(bounds.height, 1) }
+            ?? max(displayScale, 1)
+        let sourceSizes = items.map { item in
+            item.block.original.visualStyle.estimatedFontSize > 0
+                ? item.block.original.visualStyle.estimatedFontSize / max(pixelScaleY, 1)
                 : 14
         }
-        let targetSize = min(20, max(11, sourceSizes.reduce(0, +) / CGFloat(max(1, sourceSizes.count))))
-        // 完整显示优先于可读性：极窄或极矮的选区允许继续缩小字号，不能裁掉末行。
-        let font = fontThatFits(text: text, in: flowRect, targetSize: targetSize, minimumSize: 1)
-        let backgroundColor = sampledBackgroundColor(forPixelRect: first.original.boundingBox)
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: resolvedTextColor(sourceStyle: first.original.visualStyle, backgroundColor: backgroundColor),
-            .paragraphStyle: paragraphStyle
-        ]
-        (text as NSString).draw(in: flowRect, withAttributes: attrs)
+        return min(20, max(11, sourceSizes.reduce(0, +) / CGFloat(max(1, sourceSizes.count))))
     }
 
     private func restoreBackground(
@@ -1526,60 +1773,6 @@ final class OverlayContentView: NSView {
             }
         }
         return backgroundLuminance > 0.48 ? .black : .white
-    }
-
-    private func textLayout(
-        for text: String,
-        baseRect: CGRect,
-        sourceStyle: TextBlockVisualStyle
-    ) -> TextRenderLayout {
-        let pixelScaleY = screenshot.map { CGFloat($0.height) / max(bounds.height, 1) }
-            ?? max(displayScale, 1)
-        let sourceFontSize = sourceStyle.estimatedFontSize > 0
-            ? sourceStyle.estimatedFontSize / max(pixelScaleY, 1)
-            : baseRect.height * 0.72
-        let targetSize = min(max(1, sourceFontSize), 22)
-        let font = fontThatFits(text: text, in: baseRect, targetSize: targetSize)
-        let renderedHeight = min(baseRect.height, text.boundingSize(font: font, width: baseRect.width).height)
-        let textRect = CGRect(
-            x: baseRect.minX,
-            y: baseRect.minY + max(0, (baseRect.height - renderedHeight) / 2),
-            width: baseRect.width,
-            height: renderedHeight
-        )
-        return TextRenderLayout(textRect: textRect, font: font)
-    }
-
-    private func fontThatFits(text: String, in textRect: CGRect, targetSize: CGFloat, minimumSize: CGFloat = 1) -> NSFont {
-        let width = max(1, textRect.width)
-        let height = max(1, textRect.height)
-        var low = minimumSize
-        var high = max(targetSize, low)
-        var best = minimumSize
-
-        let targetFont = preferredFont(size: targetSize)
-        if text.boundingSize(font: targetFont, width: width).height <= height + 0.5 {
-            return targetFont
-        }
-
-        while high - low > 0.15 {
-            let size = (low + high) / 2
-            let font = preferredFont(size: size)
-            let required = text.boundingSize(font: font, width: width)
-
-            if required.height <= height + 0.5 {
-                best = size
-                low = size
-            } else {
-                high = size
-            }
-        }
-
-        return preferredFont(size: best)
-    }
-
-    private func preferredFont(size: CGFloat) -> NSFont {
-        .systemFont(ofSize: size, weight: .regular)
     }
 
     func renderToImage() -> CGImage? {
@@ -1938,11 +2131,6 @@ fileprivate enum OverlayDisplayMode {
     case translation
 }
 
-private struct TextRenderLayout {
-    let textRect: CGRect
-    let font: NSFont
-}
-
 private extension String {
     var shortStatusText: String {
         if contains("识别") { return "正在识别" }
@@ -1952,9 +2140,11 @@ private extension String {
 }
 
 private extension String {
-    func boundingSize(font: NSFont, width: CGFloat) -> CGSize {
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.lineBreakMode = .byCharWrapping
+    func boundingSize(
+        font: NSFont,
+        width: CGFloat,
+        paragraphStyle: NSParagraphStyle
+    ) -> CGSize {
         let attrs: [NSAttributedString.Key: Any] = [
             .font: font,
             .paragraphStyle: paragraphStyle

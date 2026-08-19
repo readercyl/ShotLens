@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import AppKit
 
 @main
 struct OverlayGeometrySmoke {
@@ -13,8 +14,75 @@ struct OverlayGeometrySmoke {
         try assertTextRemovalPreservesBackgroundVariation()
         try assertTextRemovalSurvivesImperfectForegroundEstimate()
         try assertAdjacentTextDoesNotContaminateRestoration()
+        try assertSemanticBlocksShareFullCanvasFlow()
+        try assertSeparatedColumnsKeepIndependentFlows()
+        try assertLongTranslationIsMeasuredAgainstWholeCanvas()
 
         print("Overlay geometry smoke test passed.")
+    }
+
+    private static func assertSemanticBlocksShareFullCanvasFlow() throws {
+        let first = translatedBlock("第一段译文", rect: CGRect(x: 20, y: 20, width: 900, height: 24))
+        let second = translatedBlock("第二段译文", rect: CGRect(x: 20, y: 260, width: 760, height: 24))
+        let canvas = CGRect(x: 0, y: 0, width: 1_000, height: 400)
+        let flows = OverlayTranslationLayout.makeFlows(items: [
+            OverlayTranslationLayoutItem(block: second, displayRect: CGRect(x: 20, y: 260, width: 760, height: 24)),
+            OverlayTranslationLayoutItem(block: first, displayRect: CGRect(x: 20, y: 20, width: 900, height: 24))
+        ], canvas: canvas)
+
+        guard flows.count == 1,
+              flows[0].items.map(\.block.translatedText) == ["第一段译文", "第二段译文"],
+              flows[0].layoutRect.width == canvas.width - 32,
+              flows[0].layoutRect.height == canvas.height - 32 else {
+            throw TestFailure("Semantic translation blocks must reflow in one full result-window canvas: \(flows)")
+        }
+    }
+
+    private static func assertSeparatedColumnsKeepIndependentFlows() throws {
+        let left = translatedBlock("左栏", rect: CGRect(x: 20, y: 40, width: 300, height: 24))
+        let right = translatedBlock("右栏", rect: CGRect(x: 650, y: 40, width: 300, height: 24))
+        let canvas = CGRect(x: 0, y: 0, width: 1_000, height: 300)
+        let flows = OverlayTranslationLayout.makeFlows(items: [
+            OverlayTranslationLayoutItem(block: left, displayRect: CGRect(x: 20, y: 40, width: 300, height: 24)),
+            OverlayTranslationLayoutItem(block: right, displayRect: CGRect(x: 650, y: 40, width: 300, height: 24))
+        ], canvas: canvas)
+
+        guard flows.count == 2,
+              flows[0].layoutRect.maxX <= flows[1].layoutRect.minX,
+              flows.allSatisfy({ $0.layoutRect.height == canvas.height - 32 }) else {
+            throw TestFailure("Separated columns must keep independent full-height flows: \(flows)")
+        }
+    }
+
+    private static func assertLongTranslationIsMeasuredAgainstWholeCanvas() throws {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineBreakMode = .byCharWrapping
+        paragraphStyle.paragraphSpacing = 8
+        let text = String(repeating: "这是一段需要完整显示的长译文。", count: 180)
+        let measurement = OverlayTranslationTextFit.measure(
+            text: text,
+            in: CGRect(x: 16, y: 16, width: 968, height: 368),
+            targetSize: 22,
+            paragraphStyle: paragraphStyle,
+            minimumSize: 0.25
+        )
+
+        guard measurement.fits,
+              measurement.requiredSize.height <= measurement.availableSize.height + 0.75,
+              measurement.font.pointSize <= 22 else {
+            throw TestFailure("Long translation must be measured and fit before drawing: \(measurement)")
+        }
+    }
+
+    private static func translatedBlock(_ text: String, rect: CGRect) -> TranslatedBlock {
+        TranslatedBlock(
+            original: TextBlock(
+                text: "source",
+                boundingBox: rect,
+                detectedLanguage: "en"
+            ),
+            translatedText: text
+        )
     }
 
     private static func assertPixelRectKeepsExactTopLeftAnchor() throws {

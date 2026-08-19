@@ -106,12 +106,14 @@ if rg -n 'SelectionClient\(\)\.select|ShotLensSelect' "$SHOTLENS_APP" "$ROOT_DIR
 fi
 rg -n 'InProcessSelectionOverlay' "$SHOTLENS_APP" "$SELECTION_OVERLAY" >/dev/null
 rg -n 'OverlayGeometry\.displayRect' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'OverlayTranslationLayout\.makeFlows' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'OverlayTranslationTextFit\.measure' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'OverlayTextBackgroundRestorer\.restoredPatch' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'drawFallbackBackground' "$OVERLAY_WINDOW" >/dev/null
 rg -n -U '} else \{\n\s+drawFallbackBackground' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'sampledBackgroundColor' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'resolvedTextColor' "$OVERLAY_WINDOW" >/dev/null
-rg -n 'var best = minimumSize' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'var best = low' "$OVERLAY_WINDOW" >/dev/null
 if rg -n 'backgroundColor\.setFill|NSBezierPath\(rect: layout\.' "$OVERLAY_WINDOW" >/dev/null; then
   echo "Translated text must not render on a solid background block." >&2
   exit 1
