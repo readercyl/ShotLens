@@ -237,6 +237,9 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     private func togglePinned() {
         isPinned.toggle()
         pinWindow?.setPinned(isPinned)
+        if !isPinned {
+            rebindControlWindows()
+        }
         syncControlWindows()
         applyControlVisibility()
     }
@@ -278,7 +281,10 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     }
 
     private func closeSaveWindow() {
-        saveWindow?.close()
+        if let saveWindow {
+            resultWindow?.removeChildWindow(saveWindow)
+            saveWindow.close()
+        }
         saveWindow = nil
     }
 
@@ -303,6 +309,24 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
             saveWindow?.syncStatusFrame(statusWindow.frame)
         }
         pinWindow?.syncAnchorRect(resultWindow.frame)
+    }
+
+    /// orderOut/orderFront 在 pin 切换后可能让 AppKit 保留可见窗口但丢失有效的
+    /// child-window 绑定；unpin 时重新挂回父窗，再做一次绝对位置校正。
+    private func rebindControlWindows() {
+        guard let resultWindow else { return }
+        if let statusWindow {
+            resultWindow.removeChildWindow(statusWindow)
+            resultWindow.addChildWindow(statusWindow, ordered: .above)
+        }
+        if let saveWindow {
+            resultWindow.removeChildWindow(saveWindow)
+            resultWindow.addChildWindow(saveWindow, ordered: .above)
+        }
+        if let pinWindow {
+            resultWindow.removeChildWindow(pinWindow)
+            resultWindow.addChildWindow(pinWindow, ordered: .above)
+        }
     }
 
     @MainActor

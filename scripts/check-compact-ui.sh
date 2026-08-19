@@ -70,6 +70,9 @@ rg -n 'copyTextButton\.toolTip = "复制译文"' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'retranslateButton\.toolTip = "重新翻译"' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'saveButton\.toolTip = "复制截图"' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'applyControlVisibility' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'rebindControlWindows' "$OVERLAY_WINDOW" >/dev/null
+rg -n -U 'if !isPinned \{\n\s+rebindControlWindows\(\)' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'resultWindow\?\.removeChildWindow\(saveWindow\)' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'dismissFromOutsideClick' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'onRetranslate' "$OVERLAY_WINDOW" "$SHOTLENS_APP" >/dev/null
 rg -n 'overlay\.onRetranslate = overlay\.onRetry' "$SHOTLENS_APP" >/dev/null
