@@ -155,8 +155,8 @@ private struct FlowGroup {
     }
 }
 
-/// 根据语义密度决定局部替换还是整块重排：孤立英文尽量原位替换，
-/// 英文占主体且只夹少量中文或数字时保留受保护内容后整块重排。
+/// 每个视觉语义块作为完整上下文发送；模型负责把所有非中文自然语言翻译为中文，
+/// 并保留已有中文、数字、代码与链接。
 struct TranslationContentPlan {
     private struct BlockPlan {
         let original: TextBlock
@@ -169,85 +169,13 @@ struct TranslationContentPlan {
     static func make(from blocks: [TextBlock]) -> TranslationContentPlan {
         var sourceTexts: [String] = []
         var blockPlans: [BlockPlan] = []
-        for block in blocks where block.text.containsLatinLetter {
+        for block in blocks where block.text.containsTranslatableLanguage {
             let source = block.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            let localizedBlocks = localizedEnglishBlocks(from: block)
-
-            if shouldReflowSemanticBlock(source: source, englishRunCount: block.englishRuns.count)
-                || localizedBlocks.isEmpty {
-                let index = sourceTexts.count
-                sourceTexts.append(source)
-                blockPlans.append(BlockPlan(original: block, translationIndex: index))
-                continue
-            }
-
-            for localizedBlock in localizedBlocks {
-                let index = sourceTexts.count
-                sourceTexts.append(localizedBlock.text)
-                blockPlans.append(BlockPlan(original: localizedBlock, translationIndex: index))
-            }
+            let index = sourceTexts.count
+            sourceTexts.append(source)
+            blockPlans.append(BlockPlan(original: block, translationIndex: index))
         }
         return TranslationContentPlan(sourceTexts: sourceTexts, blockPlans: blockPlans)
-    }
-
-    private static func shouldReflowSemanticBlock(source: String, englishRunCount: Int) -> Bool {
-        let latinCount = source.latinLetterCount
-        let hanCount = source.hanCharacterCount
-        let digitCount = source.digitCount
-        let protectedCount = hanCount + digitCount
-        let semanticCount = max(1, latinCount + protectedCount)
-        let protectedRatio = Double(protectedCount) / Double(semanticCount)
-        let sentenceLike = englishRunCount > 3
-            || source.contains(where: { ".!?。！？".contains($0) })
-
-        if protectedCount > 0 {
-            return protectedRatio <= 0.35
-        }
-        return sentenceLike || englishRunCount > 3
-    }
-
-    private static func localizedEnglishBlocks(from block: TextBlock) -> [TextBlock] {
-        let runs = block.englishRuns.sorted {
-            let tolerance = max(4, min($0.boundingBox.height, $1.boundingBox.height) * 0.35)
-            if abs($0.boundingBox.midY - $1.boundingBox.midY) > tolerance {
-                return $0.boundingBox.minY < $1.boundingBox.minY
-            }
-            return $0.boundingBox.minX < $1.boundingBox.minX
-        }
-        guard !runs.isEmpty else { return [] }
-
-        var groups: [[TextRun]] = []
-        for run in runs {
-            if let lastGroup = groups.last,
-               let previous = lastGroup.last,
-               canJoinLocalizedRuns(previous, run) {
-                groups[groups.count - 1].append(run)
-            } else {
-                groups.append([run])
-            }
-        }
-
-        return groups.map { group in
-            let boundingBox = group.dropFirst().reduce(group[0].boundingBox) {
-                $0.union($1.boundingBox)
-            }
-            return TextBlock(
-                text: group.map(\.text).joined(separator: " "),
-                boundingBox: boundingBox,
-                detectedLanguage: "en",
-                visualStyle: block.visualStyle,
-                englishRuns: group
-            )
-        }
-    }
-
-    private static func canJoinLocalizedRuns(_ lhs: TextRun, _ rhs: TextRun) -> Bool {
-        let minHeight = max(1, min(lhs.boundingBox.height, rhs.boundingBox.height))
-        let verticalDistance = abs(lhs.boundingBox.midY - rhs.boundingBox.midY)
-        let horizontalGap = rhs.boundingBox.minX - lhs.boundingBox.maxX
-        return verticalDistance <= minHeight * 0.4
-            && horizontalGap >= -minHeight * 0.25
-            && horizontalGap <= max(8, minHeight * 0.75)
     }
 
     func applying(_ translations: [String]) -> [TranslatedBlock]? {
@@ -273,6 +201,15 @@ private extension String {
             (65...90).contains(Int(scalar.value))
                 || (97...122).contains(Int(scalar.value))
                 || (0x00C0...0x024F).contains(Int(scalar.value))
+        }
+    }
+
+    var containsTranslatableLanguage: Bool {
+        unicodeScalars.contains { scalar in
+            guard CharacterSet.letters.contains(scalar) else { return false }
+            return !((0x3400...0x4DBF).contains(Int(scalar.value))
+                || (0x4E00...0x9FFF).contains(Int(scalar.value))
+                || (0xF900...0xFAFF).contains(Int(scalar.value)))
         }
     }
 

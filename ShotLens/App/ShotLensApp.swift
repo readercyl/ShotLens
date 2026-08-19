@@ -542,7 +542,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay?.setProcessing("正在翻译...")
 
         // 2. 确定源语言和目标语言
-        let sourceLang = "en"
+        let sourceLang = "auto"
         let targetLang = "zh-Hans"
 
         let provider = TranslationProviderFactory.create(with: settings)
@@ -560,10 +560,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlay?.setMessage(userFacingTranslationFailureMessage(for: error))
             return
         }
-        guard let translatedBlocks = contentPlan.applyingAvailable(translationResult.translations),
+        guard translationResult.isComplete,
+              let translatedBlocks = contentPlan.applyingAvailable(translationResult.translations),
               !translatedBlocks.isEmpty else {
             ShotLensLogger.log("翻译返回数量与待翻译英文片段不一致")
-            overlay?.setMessage("翻译失败")
+            overlay?.setMessage("翻译失败：部分内容未完成")
             return
         }
         ShotLensLogger.log(String(

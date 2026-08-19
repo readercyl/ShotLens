@@ -26,6 +26,8 @@ swiftc \
 rg -n 'let originalBlocks = try recognizeTextBlocks' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
 rg -n 'mergeRecognitionPasses\(primary: originalBlocks, supplemental: enhancedBlocks\)' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
 rg -n 'request\.usesLanguageCorrection = true' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
-rg -n 'request\.recognitionLanguages = \["en-US", "zh-Hans"\]' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
+rg -n 'request\.automaticallyDetectsLanguage = true' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
+rg -n 'supportedRecognitionLanguages\(\)' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
+rg -n 'supportedRecognitionLanguages\(for: \.accurate' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
 rg -n 'allow-edge-text' "$ROOT_DIR/ShotLens/Core/OCREngine.swift" "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
 rg -n 'boundingBox\(for:' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null

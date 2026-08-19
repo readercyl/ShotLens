@@ -1415,10 +1415,17 @@ final class OverlayContentView: NSView {
         sortedBlocks: [TranslatedBlock],
         sourceRects: [CGRect]
     ) -> Bool {
-        guard sortedBlocks.count >= 2,
+        guard !sortedBlocks.isEmpty,
               sourceRects.count == sortedBlocks.count,
               sourceRects.allSatisfy({ $0.width > 0 && $0.height > 0 }) else {
             return false
+        }
+        if sortedBlocks.count == 1 {
+            return textLayout(
+                for: sortedBlocks[0].translatedText,
+                baseRect: sourceRects[0],
+                sourceStyle: sortedBlocks[0].original.visualStyle
+            ).font.pointSize < 10.5
         }
         let first = sourceRects[0]
         let lineHeight = max(1, first.height)

@@ -80,7 +80,7 @@ struct ShotLensOCR {
         request.usesLanguageCorrection = true
         request.automaticallyDetectsLanguage = true
         request.minimumTextHeight = 0.004
-        request.recognitionLanguages = ["en-US", "zh-Hans"]
+        request.recognitionLanguages = supportedRecognitionLanguages()
         request.customWords = [
             "AI",
             "API",
@@ -119,6 +119,12 @@ struct ShotLensOCR {
                 allowEdgeText: allowEdgeText
             )
         }
+    }
+
+    private static func supportedRecognitionLanguages() -> [String] {
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        return (try? request.supportedRecognitionLanguages()) ?? ["en-US", "zh-Hans"]
     }
 
     private static func bestCandidate(from observation: VNRecognizedTextObservation) -> VNRecognizedText? {
@@ -500,7 +506,7 @@ private extension String {
     }
 
     var hasMeaningfulOCRContent: Bool {
-        containsLatinLetter
+        unicodeScalars.contains(where: { CharacterSet.letters.contains($0) })
             || containsHanCharacter
             || unicodeScalars.contains(where: { CharacterSet.decimalDigits.contains($0) })
     }

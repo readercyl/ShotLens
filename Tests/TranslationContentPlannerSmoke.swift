@@ -11,6 +11,7 @@ struct TranslationContentPlannerSmoke {
         try assertLightMixedContentReflowsAsOneSemanticBlock()
         try assertChineseDominantContentOnlyReplacesEnglishRuns()
         try assertSeparatedEnglishRunsDoNotCoverProtectedText()
+        try assertCommonNonLatinLanguagesAreIncluded()
         try assertPartialTranslationsKeepIndependentBlocks()
         try assertWrappedHeadingAndParagraphFormSemanticBlocks()
         try assertColumnsStayIndependent()
@@ -58,7 +59,7 @@ struct TranslationContentPlannerSmoke {
         let plan = TranslationContentPlan.make(from: [source])
         let translated = plan.applying(["打开设置"])
         guard plan.sourceTexts == ["Open settings"],
-              translated?.first?.original.boundingBox == CGRect(x: 10, y: 10, width: 120, height: 24) else {
+              translated?.first?.original.boundingBox == source.boundingBox else {
             throw TestFailure("Isolated English phrase should stay localized: \(plan.sourceTexts)")
         }
     }
@@ -89,9 +90,9 @@ struct TranslationContentPlannerSmoke {
             englishRuns: [run("Settings", x: 88, width: 76)]
         )
         let plan = TranslationContentPlan.make(from: [source])
-        guard plan.sourceTexts == ["Settings"],
-              plan.applying(["设置"])?.first?.original.boundingBox == CGRect(x: 88, y: 10, width: 76, height: 24) else {
-            throw TestFailure("Chinese-dominant content should only replace English runs: \(plan.sourceTexts)")
+        guard plan.sourceTexts == ["请点击 Settings 打开设置页面"],
+              plan.applying(["请点击设置打开设置页面"])?.first?.original.boundingBox == source.boundingBox else {
+            throw TestFailure("Chinese content must remain protected while the full semantic line is translated: \(plan.sourceTexts)")
         }
     }
 
@@ -105,8 +106,18 @@ struct TranslationContentPlannerSmoke {
             ]
         )
         let plan = TranslationContentPlan.make(from: [source])
-        guard plan.sourceTexts == ["Open", "Settings"] else {
-            throw TestFailure("Separated English runs must remain independent: \(plan.sourceTexts)")
+        guard plan.sourceTexts == ["请点击 Open 中文内容 Settings 打开页面"] else {
+            throw TestFailure("Mixed-language content must stay one protected semantic record: \(plan.sourceTexts)")
+        }
+    }
+
+    private static func assertCommonNonLatinLanguagesAreIncluded() throws {
+        let sources = ["Привет мир", "これはテストです", "안녕하세요", "مرحبا بالعالم"]
+        let plan = TranslationContentPlan.make(from: sources.enumerated().map { index, text in
+            block(text, x: 10, y: CGFloat(index * 32), width: 220)
+        })
+        guard plan.sourceTexts == sources else {
+            throw TestFailure("Non-Latin language blocks must be sent for translation: \(plan.sourceTexts)")
         }
     }
 
