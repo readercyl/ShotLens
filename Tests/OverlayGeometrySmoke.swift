@@ -29,12 +29,16 @@ struct OverlayGeometrySmoke {
             OverlayTranslationLayoutItem(block: second, displayRect: CGRect(x: 20, y: 260, width: 760, height: 24)),
             OverlayTranslationLayoutItem(block: first, displayRect: CGRect(x: 20, y: 20, width: 900, height: 24))
         ], canvas: canvas)
+        let renderedTexts = flows.reduce(into: [String]()) { result, flow in
+            result.append(contentsOf: flow.items.map(\.block.translatedText))
+        }
 
-        guard flows.count == 1,
-              flows[0].items.map(\.block.translatedText) == ["第一段译文", "第二段译文"],
-              flows[0].layoutRect.width == canvas.width - 32,
-              flows[0].layoutRect.height == canvas.height - 32 else {
-            throw TestFailure("Semantic translation blocks must reflow in one full result-window canvas: \(flows)")
+        guard flows.count == 2,
+              renderedTexts == ["第一段译文", "第二段译文"],
+              flows.allSatisfy({ $0.layoutRect.width == canvas.width - 32 }),
+              flows[1].layoutRect.minY < 260,
+              flows[0].layoutRect.maxY <= flows[1].layoutRect.minY else {
+            throw TestFailure("Semantic blocks must keep structure while using allocated result-window regions: \(flows)")
         }
     }
 

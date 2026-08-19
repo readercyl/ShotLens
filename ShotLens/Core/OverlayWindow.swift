@@ -1389,7 +1389,7 @@ enum OverlayTranslationLayout {
                 height: max(2, abs(bottom - top))
             )
             let horizontalRegions = band.regions.sorted { $0.sourceBounds.minX < $1.sourceBounds.minX }
-            let usesFullWidth = horizontalRegions.count == 1 || horizontalRegions.contains { $0.isWide(canvas: canvas) }
+            let usesFullWidth = horizontalRegions.count == 1
             let horizontalSlots = usesFullWidth
                 ? horizontalRegions.map { _ in bandRect }
                 : slots(for: horizontalRegions, in: bandRect)
@@ -1481,14 +1481,12 @@ enum OverlayTranslationLayout {
         var sourceBounds: CGRect
         var referenceLeft: CGFloat
         var referenceHeight: CGFloat
-        var maxItemWidth: CGFloat
 
         init(item: OverlayTranslationLayoutItem) {
             items = [item]
             sourceBounds = item.displayRect
             referenceLeft = item.displayRect.minX
             referenceHeight = item.displayRect.height
-            maxItemWidth = item.displayRect.width
         }
 
         mutating func append(_ item: OverlayTranslationLayoutItem) {
@@ -1496,27 +1494,19 @@ enum OverlayTranslationLayout {
             sourceBounds = sourceBounds.union(item.displayRect)
             referenceLeft = (referenceLeft * CGFloat(items.count - 1) + item.displayRect.minX) / CGFloat(items.count)
             referenceHeight = (referenceHeight * CGFloat(items.count - 1) + item.displayRect.height) / CGFloat(items.count)
-            maxItemWidth = max(maxItemWidth, item.displayRect.width)
         }
 
-        func isWide(canvas: CGRect) -> Bool {
-            maxItemWidth >= canvas.width * 0.78
-        }
+        func accepts(_ rect: CGRect, canvas _: CGRect) -> Bool {
+            let verticalGap = rect.minY >= sourceBounds.maxY
+                ? rect.minY - sourceBounds.maxY
+                : sourceBounds.minY - rect.maxY
+            let verticallyRelated = verticalGap <= max(18, referenceHeight * 1.25)
+            guard verticallyRelated else { return false }
 
-        func accepts(_ rect: CGRect, canvas: CGRect) -> Bool {
             let tolerance = max(32, referenceHeight * 2)
             let leftAligned = abs(rect.minX - referenceLeft) <= tolerance
             let overlap = max(0, min(sourceBounds.maxX, rect.maxX) - max(sourceBounds.minX, rect.minX))
             let overlapRatio = overlap / max(1, min(sourceBounds.width, rect.width))
-            let wide = isWide(canvas: canvas) || rect.width >= canvas.width * 0.78
-            if wide {
-                let verticalGap = rect.minY > sourceBounds.maxY
-                    ? rect.minY - sourceBounds.maxY
-                    : sourceBounds.minY - rect.maxY
-                let narrowerAfterWide = rect.width < canvas.width * 0.6
-                    && verticalGap > max(24, referenceHeight * 2)
-                return leftAligned && !narrowerAfterWide
-            }
             return leftAligned || overlapRatio >= 0.25
         }
     }
@@ -1540,7 +1530,7 @@ enum OverlayTranslationLayout {
                 ? region.sourceBounds.minY - sourceBounds.maxY
                 : sourceBounds.minY - region.sourceBounds.maxY
             let referenceHeight = max(1, min(sourceBounds.height, region.sourceBounds.height))
-            return gap <= max(24, referenceHeight * 2)
+            return gap <= max(18, referenceHeight * 1.25)
         }
     }
 }
