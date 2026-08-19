@@ -1462,7 +1462,8 @@ final class OverlayContentView: NSView {
                 : 14
         }
         let targetSize = min(20, max(11, sourceSizes.reduce(0, +) / CGFloat(max(1, sourceSizes.count))))
-        let font = fontThatFits(text: text, in: flowRect, targetSize: targetSize, minimumSize: 11)
+        // 完整显示优先于可读性：极窄或极矮的选区允许继续缩小字号，不能裁掉末行。
+        let font = fontThatFits(text: text, in: flowRect, targetSize: targetSize, minimumSize: 1)
         let backgroundColor = sampledBackgroundColor(forPixelRect: first.original.boundingBox)
         let attrs: [NSAttributedString.Key: Any] = [
             .font: font,
@@ -1537,7 +1538,7 @@ final class OverlayContentView: NSView {
         let sourceFontSize = sourceStyle.estimatedFontSize > 0
             ? sourceStyle.estimatedFontSize / max(pixelScaleY, 1)
             : baseRect.height * 0.72
-        let targetSize = min(max(8, sourceFontSize), 22)
+        let targetSize = min(max(1, sourceFontSize), 22)
         let font = fontThatFits(text: text, in: baseRect, targetSize: targetSize)
         let renderedHeight = min(baseRect.height, text.boundingSize(font: font, width: baseRect.width).height)
         let textRect = CGRect(
@@ -1549,7 +1550,7 @@ final class OverlayContentView: NSView {
         return TextRenderLayout(textRect: textRect, font: font)
     }
 
-    private func fontThatFits(text: String, in textRect: CGRect, targetSize: CGFloat, minimumSize: CGFloat = 8) -> NSFont {
+    private func fontThatFits(text: String, in textRect: CGRect, targetSize: CGFloat, minimumSize: CGFloat = 1) -> NSFont {
         let width = max(1, textRect.width)
         let height = max(1, textRect.height)
         var low = minimumSize

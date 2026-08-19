@@ -14,7 +14,7 @@ swiftc \
 
 "$TEST_BINARY"
 
-rg -n -F 'ClipboardManager().copyImageToClipboard(image: captured.image)' \
+rg -n -F 'ClipboardManager().copyImageToClipboard(image: displayCapture.image)' \
   "$ROOT_DIR/ShotLens/App/ShotLensApp.swift" >/dev/null
 
 rg -n -F 'ClipboardManager().copyImageToClipboard(image: image)' \

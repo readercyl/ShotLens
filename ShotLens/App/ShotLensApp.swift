@@ -565,12 +565,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard translationResult.isComplete,
               let translatedBlocks = contentPlan.applyingAvailable(translationResult.translations),
               !translatedBlocks.isEmpty else {
-            ShotLensLogger.log("翻译返回数量与待翻译英文片段不一致")
+            ShotLensLogger.log("翻译返回数量与待翻译语义块不一致，完成 \(translationResult.completedCount)/\(texts.count)")
             overlay?.setMessage("翻译失败：部分内容未完成")
             return
         }
         ShotLensLogger.log(String(
-            format: "翻译完成，使用 %@，完成 %d/%d 个英文片段，耗时 %.2fs",
+            format: "翻译完成，使用 %@，完成 %d/%d 个语义块，耗时 %.2fs",
             provider.name,
             translationResult.completedCount,
             translationResult.translations.count,

@@ -5,6 +5,9 @@ struct LLMTranslator: TranslationProvider {
     let settings: TranslationSettings
     private let maxBatchItemCount = 60
     private let maxBatchCharacterCount = 8_000
+    /// 单条语义块过长时，模型往往会在输出末尾截断或漏掉编号。
+    /// 在 API 请求边界拆分，回到同一原文项后再合并，避免把长段落当成一个不可控请求。
+    private let maxTranslationChunkCharacters = 3_200
     private static let deterministicUITranslations = [
         "settings": "设置",
         "search": "搜索",
@@ -136,26 +139,116 @@ struct LLMTranslator: TranslationProvider {
             return TranslationBatchResult(translations: result)
         }
 
-        var remoteTranslations: [String?] = []
-        remoteTranslations.reserveCapacity(remoteTexts.count)
-        for batch in makeBatches(from: remoteTexts) {
-            remoteTranslations.append(contentsOf: try await translateBatchAvailable(
-                batch,
-                from: sourceLanguage,
-                to: targetLanguage
-            ))
+        let segments = remoteTexts.enumerated().flatMap { offset, text in
+            splitLongText(text).map { TranslationSegment(sourceIndex: remoteIndexes[offset], text: $0) }
         }
-        guard remoteTranslations.count == remoteIndexes.count else {
-            throw TranslationError.invalidLLMResponse
+        var segmentTranslations = [String?](repeating: nil, count: segments.count)
+        var cursor = 0
+        for batch in makeBatches(from: segments.map(\.text)) {
+            let batchEnd = cursor + batch.count
+            let batchSegments = Array(segments[cursor..<batchEnd])
+            let translations: [String?]
+            do {
+                translations = try await translateBatchAvailable(
+                    batch,
+                    from: sourceLanguage,
+                    to: targetLanguage
+                )
+            } catch let error as TranslationError {
+                guard case .invalidLLMResponse = error else { throw error }
+                // 整批格式失败时保留缺项槽位，下面的单项重试会继续恢复它们。
+                translations = [String?](repeating: nil, count: batch.count)
+            }
+            guard translations.count == batchSegments.count else {
+                throw TranslationError.invalidLLMResponse
+            }
+            for (offset, translation) in translations.enumerated() {
+                segmentTranslations[cursor + offset] = translation
+            }
+            cursor = batchEnd
         }
-        for (offset, index) in remoteIndexes.enumerated() {
-            result[index] = remoteTranslations[offset]
+
+        // 模型偶尔会漏掉单个编号项。只重试缺项，不重复发送已完成的大批次，
+        // 既降低请求量，也避免一次偶发格式问题让整段翻译失败。
+        for index in segmentTranslations.indices where segmentTranslations[index] == nil {
+            let segment = segments[index]
+            ShotLensLogger.log("翻译缺项，按单项重试 \(segment.sourceIndex)")
+            do {
+                let retry = try await translateBatchAvailable(
+                    [segment.text],
+                    from: sourceLanguage,
+                    to: targetLanguage
+                )
+                segmentTranslations[index] = retry.first ?? nil
+            } catch let error as TranslationError {
+                switch error {
+                case .invalidLLMResponse, .llmResponseCountMismatch:
+                    continue
+                default:
+                    throw error
+                }
+            }
+        }
+
+        var groupedTranslations = [[String]](repeating: [], count: texts.count)
+        for (index, segment) in segments.enumerated() {
+            guard let translation = segmentTranslations[index] else { continue }
+            groupedTranslations[segment.sourceIndex].append(translation)
+        }
+        for index in remoteIndexes {
+            let expectedSegmentCount = splitLongText(texts[index]).count
+            guard groupedTranslations[index].count == expectedSegmentCount else {
+                result[index] = nil
+                continue
+            }
+            let separator = groupedTranslations[index].contains(where: { $0.containsCJK }) ? "" : " "
+            result[index] = groupedTranslations[index].joined(separator: separator)
         }
         let available = TranslationBatchResult(translations: result)
         if available.isComplete {
             TranslationResultCache.shared.store(result.compactMap { $0 }, for: cacheKey)
         }
         return available
+    }
+
+    private struct TranslationSegment {
+        let sourceIndex: Int
+        let text: String
+    }
+
+    private func splitLongText(_ text: String) -> [String] {
+        guard text.count > maxTranslationChunkCharacters else { return [text] }
+
+        let characters = Array(text)
+        var chunks: [String] = []
+        var start = 0
+        while start < characters.count {
+            let remaining = characters.count - start
+            if remaining <= maxTranslationChunkCharacters {
+                let tail = String(characters[start...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !tail.isEmpty { chunks.append(tail) }
+                break
+            }
+
+            let hardEnd = start + maxTranslationChunkCharacters
+            let softStart = start + max(1, Int(Double(maxTranslationChunkCharacters) * 0.6))
+            var end = hardEnd
+            for index in stride(from: hardEnd, through: softStart, by: -1) {
+                if isNaturalChunkBoundary(characters[index - 1]) {
+                    end = index
+                    break
+                }
+            }
+            if end <= start { end = hardEnd }
+            let chunk = String(characters[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !chunk.isEmpty { chunks.append(chunk) }
+            start = end
+        }
+        return chunks.isEmpty ? [text] : chunks
+    }
+
+    private func isNaturalChunkBoundary(_ character: Character) -> Bool {
+        character.isWhitespace || ".!?。！？；;:\n".contains(character)
     }
 
     static func resetSessionCacheForTesting() {

@@ -83,13 +83,14 @@ struct TranslationEndpointSmoke {
         try await assertCommonShortUIWordUsesLocalFallback()
         try await assertMixedLocalAndRemoteTranslationsAreReassembled()
         try await assertExactBatchUsesSessionCache()
-        try await assertMalformedOutputFailsWithoutSecondRequest()
+        try await assertMalformedOutputFailsAfterBoundedRetry()
         try await assertLabeledSingleTranslationExtractsChinese()
         try await assertAbbreviationUsesSurroundingContext()
         try await assertArrowOutputAvoidsRepairRequest()
         try await assertTypicalLargeSelectionStaysSingleRequest()
+        try await assertLongSemanticBlockSplitsAndReassembles()
         try await assertIndexedJSONStringsAreAlignedWithoutRepair()
-        try await assertMissingIndexedItemFailsWithoutSecondRequest()
+        try await assertMissingIndexedItemRecoversWithSingleItemRetry()
         try await assertPartialIndexedObjectKeepsAvailableItems()
         try await assertSingleMiddleIndexedObjectKeepsItsPosition()
         try await assertNestedMetadataDoesNotDiscardTranslations()
@@ -99,7 +100,7 @@ struct TranslationEndpointSmoke {
         try await assertExistingNumbersMustBePreserved()
         try await assertProductIdentifierMayRemainUntranslated()
         try await assertPunctuatedIndexedJSONStaysSingleRequest()
-        try await assertUntranslatedSentenceFailsWithoutSecondRequest()
+        try await assertUntranslatedSentenceFailsAfterBoundedRetry()
         try await assertCustomSavedSettingsSurviveLoad()
         try await assertEmptySavedSettingsStayUnconfigured()
         try await assertConnectionCheckUsesChatCompletions()
@@ -493,7 +494,7 @@ struct TranslationEndpointSmoke {
         }
     }
 
-    private static func assertMalformedOutputFailsWithoutSecondRequest() async throws {
+    private static func assertMalformedOutputFailsAfterBoundedRetry() async throws {
         MockOpenAIProtocol.reset()
         MockOpenAIProtocol.assistantContent = "target=zh-Hans\noriginal_items:\n0\tAccount preferences\ninvalid output"
 
@@ -509,8 +510,8 @@ struct TranslationEndpointSmoke {
         } catch is TestFailure {
             throw TestFailure("Expected malformed output to fail")
         } catch {
-            guard MockOpenAIProtocol.requestBodies.count == 1 else {
-                throw TestFailure("Malformed output must not trigger a second network request")
+            guard MockOpenAIProtocol.requestBodies.count == 2 else {
+                throw TestFailure("Malformed output should receive one bounded item retry")
             }
         }
     }
@@ -598,6 +599,27 @@ struct TranslationEndpointSmoke {
         }
     }
 
+    private static func assertLongSemanticBlockSplitsAndReassembles() async throws {
+        MockOpenAIProtocol.reset()
+        let source = String(repeating: "This is a long sentence that should be split safely. ", count: 110)
+        MockOpenAIProtocol.assistantContent = #"["第一段","第二段"]"#
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+
+        let result = try await translator.translate([source], from: "en", to: "zh-Hans")
+        guard result == ["第一段第二段"],
+              MockOpenAIProtocol.requestBodies.count == 1 else {
+            throw TestFailure("Expected a long semantic block to split and reassemble")
+        }
+        let body = MockOpenAIProtocol.requestBodies[0]
+        guard body.contains(#"0\tThis is"#), body.contains(#"1\t"#) else {
+            throw TestFailure("Expected the long semantic block to be sent as two numbered segments")
+        }
+    }
+
     private static func assertIndexedJSONStringsAreAlignedWithoutRepair() async throws {
         MockOpenAIProtocol.reset()
         MockOpenAIProtocol.assistantContent = #"["0 产品版本更新","1 Intelligence Index v4.1","2 功能更新"]"#
@@ -621,7 +643,7 @@ struct TranslationEndpointSmoke {
         }
     }
 
-    private static func assertMissingIndexedItemFailsWithoutSecondRequest() async throws {
+    private static func assertMissingIndexedItemRecoversWithSingleItemRetry() async throws {
         MockOpenAIProtocol.reset()
         MockOpenAIProtocol.assistantContentQueue = [
             #"["0 个性化模型推荐器","2 探索高级计划"]"#,
@@ -632,25 +654,23 @@ struct TranslationEndpointSmoke {
             apiKey: "test-key",
             model: "test-model"
         ))
-        do {
-            _ = try await translator.translate(
+        let result = try await translator.translate(
                 ["Personalized model recommender", "Explore agents for general work, coding, and customer support", "Explore premium plans"],
                 from: "en",
                 to: "zh-Hans"
             )
-            throw TestFailure("Expected incomplete indexed output to fail")
-        } catch is TestFailure {
-            throw TestFailure("Expected incomplete indexed output to fail")
-        } catch {
-            guard MockOpenAIProtocol.requestBodies.count == 1 else {
-                throw TestFailure("Incomplete indexed output must not trigger a second request")
-            }
+        guard result == ["个性化模型推荐器", "探索适用于一般工作、编程和客户支持的智能助手", "探索高级计划"],
+              MockOpenAIProtocol.requestBodies.count == 2 else {
+            throw TestFailure("Expected missing indexed item to recover with one item retry: \(result), requests=\(MockOpenAIProtocol.requestBodies.count)")
         }
     }
 
     private static func assertPartialIndexedObjectKeepsAvailableItems() async throws {
         MockOpenAIProtocol.reset()
-        MockOpenAIProtocol.assistantContent = #"{"0":"版本更新","2":"功能说明"}"#
+        MockOpenAIProtocol.assistantContentQueue = [
+            #"{"0":"版本更新","2":"功能说明"}"#,
+            "0\t页面标题"
+        ]
         let translator = LLMTranslator(settings: TranslationSettings(
             apiEndpoint: "https://shotlens-test.local/v1",
             apiKey: "test-key",
@@ -663,20 +683,24 @@ struct TranslationEndpointSmoke {
             to: "zh-Hans"
         )
         guard result.translations[0] == "版本更新",
-              result.translations[1] == nil,
+              result.translations[1] == "页面标题",
               result.translations[2] == "功能说明",
-              result.completedCount == 2,
-              !result.isComplete else {
-            throw TestFailure("Expected valid indexed items to survive a partial response: \(result.translations)")
+              result.completedCount == 3,
+              result.isComplete else {
+            throw TestFailure("Expected valid indexed items to survive and recover a partial response: \(result.translations)")
         }
-        guard MockOpenAIProtocol.requestBodies.count == 1 else {
-            throw TestFailure("Partial response must not trigger another network request")
+        guard MockOpenAIProtocol.requestBodies.count == 2 else {
+            throw TestFailure("Partial response should receive one bounded retry")
         }
     }
 
     private static func assertSingleMiddleIndexedObjectKeepsItsPosition() async throws {
         MockOpenAIProtocol.reset()
-        MockOpenAIProtocol.assistantContent = #"{"1":"页面标题"}"#
+        MockOpenAIProtocol.assistantContentQueue = [
+            #"{"1":"页面标题"}"#,
+            "0\t更新",
+            "0\t说明"
+        ]
         let translator = LLMTranslator(settings: TranslationSettings(
             apiEndpoint: "https://shotlens-test.local/v1",
             apiKey: "test-key",
@@ -688,14 +712,14 @@ struct TranslationEndpointSmoke {
             from: "en",
             to: "zh-Hans"
         )
-        guard result.translations[0] == nil,
+        guard result.translations[0] == "更新",
               result.translations[1] == "页面标题",
-              result.translations[2] == nil,
-              result.completedCount == 1 else {
-            throw TestFailure("Expected the zero-based middle item to keep its position: \(result.translations)")
+              result.translations[2] == "说明",
+              result.completedCount == 3 else {
+            throw TestFailure("Expected the middle item to keep its position after retries: \(result.translations)")
         }
-        guard MockOpenAIProtocol.requestBodies.count == 1 else {
-            throw TestFailure("A single valid partial item must not trigger another request")
+        guard MockOpenAIProtocol.requestBodies.count == 3 else {
+            throw TestFailure("Each missing item should receive one bounded retry")
         }
     }
 
@@ -767,8 +791,8 @@ struct TranslationEndpointSmoke {
         } catch is TestFailure {
             throw TestFailure("Expected altered Chinese source text to be rejected")
         } catch {
-            guard MockOpenAIProtocol.requestBodies.count == 1 else {
-                throw TestFailure("Chinese-preservation failure must not trigger another request")
+            guard MockOpenAIProtocol.requestBodies.count == 2 else {
+                throw TestFailure("Chinese-preservation failure should receive one bounded retry")
             }
         }
     }
@@ -787,13 +811,13 @@ struct TranslationEndpointSmoke {
         } catch is TestFailure {
             throw TestFailure("Expected altered numeric source text to be rejected")
         } catch {
-            guard MockOpenAIProtocol.requestBodies.count == 1 else {
-                throw TestFailure("Number-preservation failure must not trigger another request")
+            guard MockOpenAIProtocol.requestBodies.count == 2 else {
+                throw TestFailure("Number-preservation failure should receive one bounded retry")
             }
         }
     }
 
-    private static func assertUntranslatedSentenceFailsWithoutSecondRequest() async throws {
+    private static func assertUntranslatedSentenceFailsAfterBoundedRetry() async throws {
         MockOpenAIProtocol.reset()
         let source = "Compare AI agents across capabilities, pricing, and platform support"
         MockOpenAIProtocol.assistantContent = String(
@@ -812,8 +836,8 @@ struct TranslationEndpointSmoke {
         } catch is TestFailure {
             throw TestFailure("Expected untranslated sentence to fail")
         } catch {
-            guard MockOpenAIProtocol.requestBodies.count == 1 else {
-                throw TestFailure("Untranslated output must not trigger a second request")
+            guard MockOpenAIProtocol.requestBodies.count == 2 else {
+                throw TestFailure("Untranslated output should receive one bounded retry")
             }
         }
     }
