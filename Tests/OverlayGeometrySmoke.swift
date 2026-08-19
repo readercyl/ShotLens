@@ -100,6 +100,10 @@ struct OverlayGeometrySmoke {
         guard rects.count == 2,
               rects[0].minY == 42,
               rects[1].minY == 42,
+              rects[0].height >= 28,
+              rects[1].height >= 28,
+              rects[0].width >= 160,
+              rects[1].width >= 120,
               rects[0].maxX < rects[1].minX else {
             throw TestFailure("Short content must preserve its source row and columns: \(rects)")
         }

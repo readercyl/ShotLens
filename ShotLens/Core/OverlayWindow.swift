@@ -1399,11 +1399,13 @@ enum OverlayTranslationLayout {
             let bottom = nextRow.map { $0.displayRect.minY - 8 } ?? contentRect.maxY
             let left = max(contentRect.minX, source.minX)
             let top = max(contentRect.minY, source.minY)
+            let rightEdge = min(contentRect.maxX, max(source.maxX, right))
+            let bottomEdge = min(contentRect.maxY, max(source.maxY, bottom))
             return CGRect(
                 x: left,
                 y: top,
-                width: max(2, min(contentRect.maxX, right) - left),
-                height: max(2, min(contentRect.maxY, bottom) - top)
+                width: max(2, rightEdge - left),
+                height: max(2, bottomEdge - top)
             )
         }
     }
