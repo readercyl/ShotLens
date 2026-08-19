@@ -53,8 +53,9 @@ struct OverlayGeometrySmoke {
 
         guard flows.count == 2,
               flows[0].layoutRect.maxX <= flows[1].layoutRect.minX,
-              flows.allSatisfy({ $0.layoutRect.height == canvas.height - 32 }) else {
-            throw TestFailure("Separated columns must keep independent full-height flows: \(flows)")
+              flows.allSatisfy({ $0.layoutRect.minY == 36 }),
+              flows.allSatisfy({ $0.layoutRect.maxY == canvas.height - 16 }) else {
+            throw TestFailure("Separated columns must keep independent anchored flows: \(flows)")
         }
     }
 

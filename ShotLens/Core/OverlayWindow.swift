@@ -1376,12 +1376,19 @@ enum OverlayTranslationLayout {
         var flows: [OverlayTranslationFlow] = []
         for bandIndex in bands.indices {
             let band = bands[bandIndex]
-            let top = bandIndex == bands.startIndex
-                ? contentRect.minY
-                : verticalBoundary(between: bands[bandIndex - 1].sourceBounds, and: band.sourceBounds)
-            let bottom = bandIndex == bands.index(before: bands.endIndex)
-                ? contentRect.maxY
-                : verticalBoundary(between: band.sourceBounds, and: bands[bandIndex + 1].sourceBounds)
+            // 保留视觉区域的原始 y 锚点，只压缩区域之间过大的空隙；
+            // 不再把第一块强行吸到结果窗顶部，也不把标签行垂直拉伸到整窗。
+            let top = min(
+                contentRect.maxY - 2,
+                max(contentRect.minY, band.sourceBounds.minY - 4)
+            )
+            let bottom: CGFloat
+            if bandIndex == bands.index(before: bands.endIndex) {
+                bottom = contentRect.maxY
+            } else {
+                let nextTop = bands[bandIndex + 1].sourceBounds.minY - 8
+                bottom = min(contentRect.maxY, max(top + 2, nextTop))
+            }
             let bandRect = CGRect(
                 x: contentRect.minX,
                 y: min(top, bottom),
@@ -1422,16 +1429,6 @@ enum OverlayTranslationLayout {
             return (lhs.maxX + rhs.minX) / 2
         }
         return (lhs.midX + rhs.midX) / 2
-    }
-
-    private static func verticalBoundary(
-        between lhs: CGRect,
-        and rhs: CGRect
-    ) -> CGFloat {
-        if lhs.maxY <= rhs.minY {
-            return (lhs.maxY + rhs.minY) / 2
-        }
-        return (lhs.midY + rhs.midY) / 2
     }
 
     private static func slots(
