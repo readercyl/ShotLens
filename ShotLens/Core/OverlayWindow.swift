@@ -1388,8 +1388,16 @@ enum OverlayTranslationLayout {
             let source = item.displayRect
             let sameRow = ordered
                 .filter {
-                    abs($0.displayRect.midY - source.midY) <= max(10, source.height * 0.8)
-                        && $0.displayRect.minX > source.minX
+                    guard $0.displayRect.minX > source.minX else { return false }
+                    let overlap = max(
+                        0,
+                        min($0.displayRect.maxY, source.maxY)
+                            - max($0.displayRect.minY, source.minY)
+                    )
+                    let minHeight = max(1, min($0.displayRect.height, source.height))
+                    let aligned = overlap / minHeight >= 0.35
+                        || abs($0.displayRect.midY - source.midY) <= max(4, minHeight * 0.35)
+                    return aligned
                 }
                 .min { $0.displayRect.minX < $1.displayRect.minX }
             let right = sameRow.map { $0.displayRect.minX - 8 } ?? contentRect.maxX

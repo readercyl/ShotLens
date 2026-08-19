@@ -90,6 +90,10 @@ struct OverlayGeometrySmoke {
             OverlayTranslationLayoutItem(
                 block: translatedBlock("标签", rect: CGRect(x: 720, y: 42, width: 120, height: 28)),
                 displayRect: CGRect(x: 720, y: 42, width: 120, height: 28)
+            ),
+            OverlayTranslationLayoutItem(
+                block: translatedBlock("下一行", rect: CGRect(x: 24, y: 78, width: 160, height: 28)),
+                displayRect: CGRect(x: 24, y: 78, width: 160, height: 28)
             )
         ]
         let canvas = CGRect(x: 0, y: 0, width: 1_000, height: 400)
@@ -97,9 +101,10 @@ struct OverlayGeometrySmoke {
             throw TestFailure("Short labels must keep the anchored rendering mode")
         }
         let rects = OverlayTranslationLayout.anchoredRects(for: items, canvas: canvas)
-        guard rects.count == 2,
+        guard rects.count == 3,
               rects[0].minY == 42,
               rects[1].minY == 42,
+              rects[2].minY == 78,
               rects[0].height >= 28,
               rects[1].height >= 28,
               rects[0].width >= 160,
