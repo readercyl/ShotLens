@@ -88,7 +88,8 @@ struct TranslationEndpointSmoke {
         try await assertLabeledSingleTranslationExtractsChinese()
         try await assertAbbreviationUsesSurroundingContext()
         try await assertArrowOutputAvoidsRepairRequest()
-        try await assertTypicalLargeSelectionStaysSingleRequest()
+        try await assertLargeSelectionUsesBoundedBatches()
+        try await assertMalformedLargeBatchUsesOneBoundedRecovery()
         try await assertLongSemanticBlockSplitsAndReassembles()
         try await assertIndexedJSONStringsAreAlignedWithoutRepair()
         try await assertMissingIndexedItemRecoversWithSingleItemRetry()
@@ -602,11 +603,18 @@ struct TranslationEndpointSmoke {
         }
     }
 
-    private static func assertTypicalLargeSelectionStaysSingleRequest() async throws {
+    private static func assertLargeSelectionUsesBoundedBatches() async throws {
         MockOpenAIProtocol.reset()
-        let input = (0..<48).map { "Source \($0)" }
+        let input = (0..<48).map { index in
+            String(repeating: "Source text for bounded batch ", count: 4) + "\(index)"
+        }
         let expected = (0..<48).map { "译文\($0)" }
-        MockOpenAIProtocol.assistantContent = String(data: try JSONSerialization.data(withJSONObject: expected), encoding: .utf8)!
+        let firstBatch = Array(expected[0..<24])
+        let secondBatch = Array(expected[24..<48])
+        MockOpenAIProtocol.assistantContentQueue = [
+            String(data: try JSONSerialization.data(withJSONObject: firstBatch), encoding: .utf8)!,
+            String(data: try JSONSerialization.data(withJSONObject: secondBatch), encoding: .utf8)!
+        ]
 
         let translator = LLMTranslator(settings: TranslationSettings(
             apiEndpoint: "https://shotlens-test.local/v1",
@@ -614,15 +622,35 @@ struct TranslationEndpointSmoke {
             model: "test-model"
         ))
         let result = try await translator.translate(input, from: "en", to: "zh-Hans")
-        guard result == expected, MockOpenAIProtocol.requestBodies.count == 1 else {
-            throw TestFailure("Expected 48 short blocks to translate in one request, requests=\(MockOpenAIProtocol.requestBodies.count)")
+        guard result == expected, MockOpenAIProtocol.requestBodies.count == 2 else {
+            throw TestFailure("Expected a large selection to use two bounded requests, requests=\(MockOpenAIProtocol.requestBodies.count)")
+        }
+    }
+
+    private static func assertMalformedLargeBatchUsesOneBoundedRecovery() async throws {
+        MockOpenAIProtocol.reset()
+        let input = (0..<24).map { "Source item \($0)" }
+        let expected = (0..<24).map { "译文\($0)" }
+        MockOpenAIProtocol.assistantContentQueue = [
+            "invalid output",
+            String(data: try JSONSerialization.data(withJSONObject: expected), encoding: .utf8)!
+        ]
+
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+        let result = try await translator.translate(input, from: "en", to: "zh-Hans")
+        guard result == expected, MockOpenAIProtocol.requestBodies.count == 2 else {
+            throw TestFailure("Expected a malformed large batch to recover as one bounded batch, requests=\(MockOpenAIProtocol.requestBodies.count)")
         }
     }
 
     private static func assertLongSemanticBlockSplitsAndReassembles() async throws {
         MockOpenAIProtocol.reset()
         let source = String(repeating: "This is a long sentence that should be split safely. ", count: 110)
-        MockOpenAIProtocol.assistantContent = #"["第一段","第二段"]"#
+        MockOpenAIProtocol.assistantContentQueue = [#"["第一段"]"#, #"["第二段"]"#]
         let translator = LLMTranslator(settings: TranslationSettings(
             apiEndpoint: "https://shotlens-test.local/v1",
             apiKey: "test-key",
@@ -631,12 +659,12 @@ struct TranslationEndpointSmoke {
 
         let result = try await translator.translate([source], from: "en", to: "zh-Hans")
         guard result == ["第一段第二段"],
-              MockOpenAIProtocol.requestBodies.count == 1 else {
+              MockOpenAIProtocol.requestBodies.count == 2 else {
             throw TestFailure("Expected a long semantic block to split and reassemble")
         }
-        let body = MockOpenAIProtocol.requestBodies[0]
-        guard body.contains(#"0\tThis is"#), body.contains(#"1\t"#) else {
-            throw TestFailure("Expected the long semantic block to be sent as two numbered segments")
+        let bodies = MockOpenAIProtocol.requestBodies.joined(separator: "\n")
+        guard bodies.contains(#"0\tThis is"#), bodies.contains(#"0\t"#) else {
+            throw TestFailure("Expected the long semantic block to be sent as bounded numbered segments")
         }
     }
 
@@ -718,8 +746,7 @@ struct TranslationEndpointSmoke {
         MockOpenAIProtocol.reset()
         MockOpenAIProtocol.assistantContentQueue = [
             #"{"1":"页面标题"}"#,
-            "0\t更新",
-            "0\t说明"
+            "0\t更新\n1\t说明"
         ]
         let translator = LLMTranslator(settings: TranslationSettings(
             apiEndpoint: "https://shotlens-test.local/v1",
@@ -738,8 +765,8 @@ struct TranslationEndpointSmoke {
               result.completedCount == 3 else {
             throw TestFailure("Expected the middle item to keep its position after retries: \(result.translations)")
         }
-        guard MockOpenAIProtocol.requestBodies.count == 3 else {
-            throw TestFailure("Each missing item should receive one bounded retry")
+        guard MockOpenAIProtocol.requestBodies.count == 2 else {
+            throw TestFailure("Missing items should share one bounded recovery request")
         }
     }
 

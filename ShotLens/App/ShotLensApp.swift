@@ -562,8 +562,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlay?.setMessage(userFacingTranslationFailureMessage(for: error))
             return
         }
-        guard translationResult.isComplete,
-              let translatedBlocks = contentPlan.applyingAvailable(translationResult.translations),
+        guard let translatedBlocks = contentPlan.applyingAvailable(translationResult.translations),
               !translatedBlocks.isEmpty else {
             ShotLensLogger.log("翻译返回数量与待翻译语义块不一致，完成 \(translationResult.completedCount)/\(texts.count)")
             overlay?.setMessage("翻译失败：部分内容未完成")

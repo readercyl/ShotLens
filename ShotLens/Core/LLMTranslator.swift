@@ -3,8 +3,9 @@ import Foundation
 struct LLMTranslator: TranslationProvider {
     let name = "大模型翻译"
     let settings: TranslationSettings
-    private let maxBatchItemCount = 60
-    private let maxBatchCharacterCount = 8_000
+    /// 保留输入、提示词和译文输出的余量，避免大选区触发服务商上下文或输出上限。
+    private let maxBatchItemCount = 24
+    private let maxBatchCharacterCount = 4_000
     /// 单条语义块过长时，模型往往会在输出末尾截断或漏掉编号。
     /// 在 API 请求边界拆分，回到同一原文项后再合并，避免把长段落当成一个不可控请求。
     private let maxTranslationChunkCharacters = 3_200
@@ -169,27 +170,44 @@ struct LLMTranslator: TranslationProvider {
             cursor = batchEnd
         }
 
-        // 模型偶尔会漏掉单个编号项。只重试缺项，不重复发送已完成的大批次，
-        // 既降低请求量，也避免一次偶发格式问题让整段翻译失败。
-        for index in segmentTranslations.indices where segmentTranslations[index] == nil {
-            let segment = segments[index]
-            ShotLensLogger.log("翻译缺项，按单项重试 \(segment.sourceIndex)")
+        // 模型偶尔会漏掉编号项。把缺项重新组成受控小批次，避免大选区
+        // 一次格式异常后扇出成几十个串行请求。
+        let missingSegmentIndexes = segmentTranslations.indices.filter {
+            segmentTranslations[$0] == nil
+        }
+        var missingCursor = 0
+        for retryBatch in makeBatches(
+            from: missingSegmentIndexes.map { segments[$0].text }
+        ) {
+            let retryEnd = missingCursor + retryBatch.count
+            let retryIndexes = Array(missingSegmentIndexes[missingCursor..<retryEnd])
+            let retryTexts = retryIndexes.map { segments[$0].text }
+            ShotLensLogger.log("翻译缺项，按恢复批次重试 \(retryTexts.count) 项")
             do {
                 let retry = try await translateBatchAvailable(
-                    [segment.text],
+                    retryTexts,
                     from: sourceLanguage,
                     to: targetLanguage,
                     isRecoveryAttempt: true
                 )
-                segmentTranslations[index] = retry.first ?? nil
+                guard retry.count == retryIndexes.count else {
+                    throw TranslationError.llmResponseCountMismatch(
+                        expected: retryIndexes.count,
+                        actual: retry.count
+                    )
+                }
+                for (offset, segmentIndex) in retryIndexes.enumerated() {
+                    segmentTranslations[segmentIndex] = retry[offset]
+                }
             } catch let error as TranslationError {
                 switch error {
                 case .invalidLLMResponse, .llmResponseCountMismatch:
-                    continue
+                    break
                 default:
                     throw error
                 }
             }
+            missingCursor = retryEnd
         }
 
         var groupedTranslations = [[String]](repeating: [], count: texts.count)
