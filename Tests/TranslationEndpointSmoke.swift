@@ -82,6 +82,7 @@ struct TranslationEndpointSmoke {
         try await assertUnchangedSingleEnglishWordUsesLocalFallback()
         try await assertShortEnglishWordEchoIsRetried()
         try await assertCommonShortUIWordUsesLocalFallback()
+        try await assertTextShapePrompts()
         try await assertMixedLocalAndRemoteTranslationsAreReassembled()
         try await assertExactBatchUsesSessionCache()
         try await assertMalformedOutputFailsAfterBoundedRetry()
@@ -467,6 +468,57 @@ struct TranslationEndpointSmoke {
         }
         guard MockOpenAIProtocol.requestBodies.isEmpty else {
             throw TestFailure("Expected deterministic UI translation to skip the network")
+        }
+    }
+
+    private static func assertTextShapePrompts() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContent = "打开设置"
+        let phraseTranslator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+        _ = try await phraseTranslator.translate(["Open settings"], from: "en", to: "zh-Hans")
+        guard MockOpenAIProtocol.requestBodies.first?.contains("short phrases or UI labels") == true else {
+            throw TestFailure("Expected a short phrase to use the phrase-specific prompt")
+        }
+
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContent = #"["OpenAI","ChatGPT"]"#
+        let properNameTranslator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+        _ = try await properNameTranslator.translate(["OpenAI", "ChatGPT"], from: "en", to: "zh-Hans")
+        guard MockOpenAIProtocol.requestBodies.first?.contains("proper names or identifiers") == true else {
+            throw TestFailure("Expected a proper-name group to use the identifier-preserving prompt")
+        }
+
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContent = "0\t选择最佳模型。"
+        let sentenceTranslator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+        _ = try await sentenceTranslator.translate(["Choose the best model."], from: "en", to: "zh-Hans")
+        guard MockOpenAIProtocol.requestBodies.first?.contains("complete sentences") == true else {
+            throw TestFailure("Expected a complete sentence to use the sentence-specific prompt")
+        }
+
+        MockOpenAIProtocol.reset()
+        let longSource = String(repeating: "This is a long document fragment. ", count: 40)
+        MockOpenAIProtocol.assistantContent = "0\t长文"
+        let longTextTranslator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+        _ = try await longTextTranslator.translate([longSource], from: "en", to: "zh-Hans")
+        guard MockOpenAIProtocol.requestBodies.first?.contains("long document fragments") == true else {
+            throw TestFailure("Expected a long text fragment to use the long-text prompt")
         }
     }
 
