@@ -325,11 +325,14 @@ struct LLMTranslator: TranslationProvider {
             throw TranslationError.llmNotConfigured
         }
 
+        let isSingleWordRequest = texts.count == 1
+            && texts[0].split(whereSeparator: { $0.isWhitespace }).count == 1
         let content = try await requestAssistantContent(
             systemPrompt: primarySystemPrompt(
                 sourceLanguage: sourceLanguage,
                 targetLanguage: targetLanguage,
-                isRecoveryAttempt: isRecoveryAttempt
+                isRecoveryAttempt: isRecoveryAttempt,
+                isSingleWordRequest: isSingleWordRequest
             ),
             userPayload: makeUserPayload(texts: texts),
             timeoutInterval: requestTimeout(for: texts, isRecoveryAttempt: isRecoveryAttempt)
@@ -426,8 +429,21 @@ struct LLMTranslator: TranslationProvider {
     private func primarySystemPrompt(
         sourceLanguage: String,
         targetLanguage: String,
-        isRecoveryAttempt: Bool
+        isRecoveryAttempt: Bool,
+        isSingleWordRequest: Bool
     ) -> String {
+        if isSingleWordRequest {
+            let recoveryInstruction = isRecoveryAttempt
+                ? "This is a recovery attempt: choose the most common Simplified Chinese dictionary or UI meaning and never repeat the source word."
+                : nil
+            return [
+                "Translate this one isolated OCR word to Simplified Chinese.",
+                "Return exactly one concise Chinese translation on one line, with no explanation, numbering, Markdown, or source word.",
+                "Choose the most common UI or dictionary meaning; preserve only an obvious proper name, abbreviation, model identifier, URL, or code.",
+                recoveryInstruction
+            ].compactMap { $0 }.joined(separator: " ")
+        }
+
         let recoveryInstruction = isRecoveryAttempt
             ? "This is a recovery attempt for an earlier incomplete item. For an ordinary isolated word, choose its most common Simplified Chinese dictionary or UI meaning; never repeat the source Latin word. Preserve only a clear proper name, abbreviation, model identifier, URL, or code."
             : nil

@@ -444,6 +444,7 @@ struct TranslationEndpointSmoke {
         let result = try await translator.translate(["abstract"], from: "en", to: "zh-Hans")
         guard result == ["摘要"],
               MockOpenAIProtocol.requestBodies.count == 2,
+              MockOpenAIProtocol.requestBodies[0].contains("one isolated OCR word"),
               MockOpenAIProtocol.requestBodies[1].contains("recovery attempt"),
               MockOpenAIProtocol.requestTimeouts == [15, 10] else {
             throw TestFailure("Expected an echoed isolated word to use a distinct fast recovery retry, got \(result), requests=\(MockOpenAIProtocol.requestBodies.count), timeouts=\(MockOpenAIProtocol.requestTimeouts)")
