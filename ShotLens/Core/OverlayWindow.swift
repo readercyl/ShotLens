@@ -1379,9 +1379,11 @@ enum OverlayTranslationLayout {
         canvas: CGRect,
         padding: CGFloat = 16
     ) -> [CGRect] {
+        let horizontalPadding = min(padding, max(0, canvas.width * 0.08))
+        let verticalPadding = min(padding, max(0, canvas.height * 0.08))
         let contentRect = canvas.insetBy(
-            dx: min(max(0, padding), max(0, canvas.width / 2 - 1)),
-            dy: min(max(0, padding), max(0, canvas.height / 2 - 1))
+            dx: horizontalPadding,
+            dy: verticalPadding
         )
         let ordered = items.sorted(by: readingOrder)
         return ordered.map { item in

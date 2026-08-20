@@ -6,6 +6,7 @@ import AppKit
 struct OverlayGeometrySmoke {
     static func main() throws {
         try assertTinySelectionKeepsCapturedAspectRatio()
+        try assertTinySelectionKeepsReadableTranslationRect()
         try assertSmallSelectionGetsOCRContext()
         try assertBoundaryTextCanBeIncludedOnlyWhenItBelongsToSelection()
         try assertExpandedCaptureUsesItsOwnDisplayScale()
@@ -262,6 +263,20 @@ struct OverlayGeometrySmoke {
         }
         guard result.origin == CGPoint(x: 100, y: 100) else {
             throw TestFailure("Expected overlay to keep the selected top-left anchor, got \(result.origin)")
+        }
+    }
+
+    private static func assertTinySelectionKeepsReadableTranslationRect() throws {
+        let canvas = CGRect(x: 0, y: 0, width: 80, height: 24)
+        let item = OverlayTranslationLayoutItem(
+            block: translatedBlock("猫", rect: canvas),
+            displayRect: canvas
+        )
+        let rects = OverlayTranslationLayout.anchoredRects(for: [item], canvas: canvas)
+        guard rects.count == 1,
+              rects[0].width >= 60,
+              rects[0].height >= 18 else {
+            throw TestFailure("Tiny word selections must keep a readable translation rectangle: \(rects)")
         }
     }
 

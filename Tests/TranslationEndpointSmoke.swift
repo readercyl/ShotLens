@@ -80,6 +80,7 @@ struct TranslationEndpointSmoke {
         try await assertSingleBlockControlTokensAreFiltered()
         try await assertSingleBlockHTTPHeadersAreFiltered()
         try await assertUnchangedSingleEnglishWordUsesLocalFallback()
+        try await assertShortEnglishWordEchoIsRetried()
         try await assertCommonShortUIWordUsesLocalFallback()
         try await assertMixedLocalAndRemoteTranslationsAreReassembled()
         try await assertExactBatchUsesSessionCache()
@@ -426,6 +427,22 @@ struct TranslationEndpointSmoke {
         }
         guard MockOpenAIProtocol.requestBodies.isEmpty else {
             throw TestFailure("Expected deterministic UI translation to skip the network")
+        }
+    }
+
+    private static func assertShortEnglishWordEchoIsRetried() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContentQueue = ["cat", "猫"]
+
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+
+        let result = try await translator.translate(["cat"], from: "en", to: "zh-Hans")
+        guard result == ["猫"], MockOpenAIProtocol.requestBodies.count == 2 else {
+            throw TestFailure("Expected a short English word echoed by the model to receive one bounded retry, got \(result)")
         }
     }
 
