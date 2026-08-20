@@ -460,8 +460,8 @@ struct TranslationEndpointSmoke {
             model: "test-model"
         ))
 
-        let result = try await translator.translate(["Pricing", "Updated"], from: "en", to: "zh-Hans")
-        guard result == ["价格", "已更新"] else {
+        let result = try await translator.translate(["Pricing", "Updated", "Release"], from: "en", to: "zh-Hans")
+        guard result == ["价格", "已更新", "发布"] else {
             throw TestFailure("Expected common UI words to use local fallbacks, got \(result)")
         }
         guard MockOpenAIProtocol.requestBodies.isEmpty else {
