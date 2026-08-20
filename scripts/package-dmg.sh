@@ -4,7 +4,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="ShotLens"
 BUILD_DIR="$ROOT_DIR/build/release"
-STAGING_DIR="$BUILD_DIR/dmg-staging"
 CODESIGN_IDENTITY="${SHOTLENS_CODESIGN_IDENTITY:-}"
 
 if [[ -z "${SHOTLENS_APP_VERSION:-}" ]]; then
@@ -13,6 +12,7 @@ if [[ -z "${SHOTLENS_APP_VERSION:-}" ]]; then
 fi
 
 APP_VERSION="$SHOTLENS_APP_VERSION"
+STAGING_DIR="$BUILD_DIR/dmg-staging-$APP_VERSION"
 DMG_PATH="$BUILD_DIR/ShotLens-$APP_VERSION.dmg"
 RAW_DMG_PATH="$BUILD_DIR/ShotLens-$APP_VERSION.raw.dmg"
 
@@ -21,7 +21,8 @@ if [[ ! "$APP_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 1
 fi
 
-rm -rf "$BUILD_DIR"
+rm -rf "$STAGING_DIR"
+rm -f "$DMG_PATH" "$RAW_DMG_PATH"
 mkdir -p "$STAGING_DIR"
 
 if [[ -z "$CODESIGN_IDENTITY" ]]; then
