@@ -432,7 +432,7 @@ struct TranslationEndpointSmoke {
 
     private static func assertShortEnglishWordEchoIsRetried() async throws {
         MockOpenAIProtocol.reset()
-        MockOpenAIProtocol.assistantContentQueue = ["cat", "猫"]
+        MockOpenAIProtocol.assistantContentQueue = ["abstract", "摘要"]
 
         let translator = LLMTranslator(settings: TranslationSettings(
             apiEndpoint: "https://shotlens-test.local/v1",
@@ -440,9 +440,12 @@ struct TranslationEndpointSmoke {
             model: "test-model"
         ))
 
-        let result = try await translator.translate(["cat"], from: "en", to: "zh-Hans")
-        guard result == ["猫"], MockOpenAIProtocol.requestBodies.count == 2 else {
-            throw TestFailure("Expected a short English word echoed by the model to receive one bounded retry, got \(result)")
+        let result = try await translator.translate(["abstract"], from: "en", to: "zh-Hans")
+        guard result == ["摘要"],
+              MockOpenAIProtocol.requestBodies.count == 2,
+              MockOpenAIProtocol.requestBodies[1].contains("recovery attempt"),
+              MockOpenAIProtocol.requestTimeouts == [15, 10] else {
+            throw TestFailure("Expected an echoed isolated word to use a distinct fast recovery retry, got \(result), requests=\(MockOpenAIProtocol.requestBodies.count), timeouts=\(MockOpenAIProtocol.requestTimeouts)")
         }
     }
 
@@ -904,6 +907,7 @@ private final class MockOpenAIProtocol: URLProtocol {
     private static var authorizations: [String] = []
     private static var apiKeys: [String] = []
     private static var bodies: [String] = []
+    private static var timeouts: [TimeInterval] = []
     static var assistantContent = "0\t你好\n1\t世界"
     static var assistantContentQueue: [String] = []
     static var chatStatusCode = 200
@@ -940,6 +944,12 @@ private final class MockOpenAIProtocol: URLProtocol {
         return bodies
     }
 
+    static var requestTimeouts: [TimeInterval] {
+        lock.lock()
+        defer { lock.unlock() }
+        return timeouts
+    }
+
     static func reset() {
         LLMTranslator.resetSessionCacheForTesting()
         lock.lock()
@@ -948,6 +958,7 @@ private final class MockOpenAIProtocol: URLProtocol {
         authorizations = []
         apiKeys = []
         bodies = []
+        timeouts = []
         assistantContent = "0\t你好\n1\t世界"
         assistantContentQueue = []
         chatStatusCode = 200
@@ -980,6 +991,7 @@ private final class MockOpenAIProtocol: URLProtocol {
         Self.authorizations.append(request.value(forHTTPHeaderField: "Authorization") ?? "")
         Self.apiKeys.append(request.value(forHTTPHeaderField: "api-key") ?? "")
         Self.bodies.append(Self.bodyString(from: request))
+        Self.timeouts.append(request.timeoutInterval)
         Self.lock.unlock()
 
         let statusCode: Int
