@@ -653,6 +653,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         run: ShotLensRunContext,
         existingTranslations: [String?]?
     ) {
+        // 重新翻译：复用现有 OCR 和语义分组，仅重新调用翻译 API。
         let retry = { [weak self, weak overlay] in
             guard let self else { return }
             self.startRecognizedTranslationAttempt(

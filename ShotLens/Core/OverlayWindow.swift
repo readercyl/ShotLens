@@ -35,6 +35,28 @@ enum OverlayGeometry {
     }
 }
 
+enum OverlayStatusGeometry {
+    static func preferredSize(
+        titleWidth: CGFloat,
+        detailWidth: CGFloat,
+        actionWidth: CGFloat?,
+        hasDetail: Bool
+    ) -> CGSize {
+        let textWidth = min(220, max(titleWidth, detailWidth))
+        let buttonWidth = actionWidth ?? 0
+        let gap: CGFloat = actionWidth == nil ? 0 : 8
+        return CGSize(
+            width: min(max(76, ceil(textWidth) + 22 + buttonWidth + gap), 320),
+            height: hasDetail ? 50 : 32
+        )
+    }
+
+    static func textRect(in bounds: CGRect, actionFrame: CGRect?) -> CGRect {
+        let maxX = actionFrame.map { $0.minX - 8 } ?? bounds.maxX
+        return CGRect(x: 11, y: 0, width: max(1, maxX - 11), height: bounds.height)
+    }
+}
+
 /// 原位翻译结果层：选区内显示截图与译文，选区外点击即结束本次截图。
 final class OverlayWindow: NSObject, NSWindowDelegate {
     var onDismiss: (() -> Void)?
@@ -1090,12 +1112,11 @@ private final class StatusContentView: NSView {
         let detailWidth = ((detail ?? "") as NSString).size(withAttributes: [
             .font: NSFont.systemFont(ofSize: 11)
         ]).width
-        let textWidth = min(220, max(titleWidth, detailWidth))
-        let buttonWidth: CGFloat = retryButton.isHidden ? 0 : retryButton.preferredWidth
-        let gap: CGFloat = retryButton.isHidden ? 0 : 8
-        return CGSize(
-            width: min(max(76, ceil(textWidth) + 22 + buttonWidth + gap), 320),
-            height: detail?.isEmpty == false ? 50 : 32
+        return OverlayStatusGeometry.preferredSize(
+            titleWidth: titleWidth,
+            detailWidth: detailWidth,
+            actionWidth: retryButton.isHidden ? nil : retryButton.preferredWidth,
+            hasDetail: detail?.isEmpty == false
         )
     }
 
@@ -1167,8 +1188,10 @@ private final class StatusContentView: NSView {
             .foregroundColor: NSColor.white,
             .paragraphStyle: singleLineParagraphStyle
         ]
-        let textMaxX = retryButton.isHidden ? bounds.maxX : retryButton.frame.minX - 8
-        let textRect = CGRect(x: 11, y: 0, width: max(1, textMaxX - 19), height: bounds.height)
+        let textRect = OverlayStatusGeometry.textRect(
+            in: bounds,
+            actionFrame: retryButton.isHidden ? nil : retryButton.frame
+        )
         if let detail, !detail.isEmpty {
             (title as NSString).draw(in: CGRect(x: textRect.minX, y: 8, width: textRect.width, height: 17), withAttributes: titleAttributes)
             let detailAttributes: [NSAttributedString.Key: Any] = [

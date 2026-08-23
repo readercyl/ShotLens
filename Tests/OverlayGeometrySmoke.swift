@@ -20,8 +20,37 @@ struct OverlayGeometrySmoke {
         try assertLongTranslationIsMeasuredAgainstWholeCanvas()
         try assertShortContentStaysAnchored()
         try assertLongContentUsesStructuredReflow()
+        try assertStatusTitleFitsBesideToggleButton()
 
         print("Overlay geometry smoke test passed.")
+    }
+
+    private static func assertStatusTitleFitsBesideToggleButton() throws {
+        let title = "翻译完成"
+        let titleWidth = (title as NSString).size(withAttributes: [
+            .font: NSFont.systemFont(ofSize: 13, weight: .medium)
+        ]).width
+        let actionWidth: CGFloat = 66
+        let size = OverlayStatusGeometry.preferredSize(
+            titleWidth: titleWidth,
+            detailWidth: 0,
+            actionWidth: actionWidth,
+            hasDetail: false
+        )
+        let actionFrame = CGRect(
+            x: size.width - actionWidth - 8,
+            y: 2,
+            width: actionWidth,
+            height: 28
+        )
+        let textRect = OverlayStatusGeometry.textRect(
+            in: CGRect(origin: .zero, size: size),
+            actionFrame: actionFrame
+        )
+
+        guard textRect.width >= ceil(titleWidth) else {
+            throw TestFailure("Translation status title is clipped beside its toggle button: \(textRect.width) < \(titleWidth)")
+        }
     }
 
     private static func assertSemanticBlocksShareFullCanvasFlow() throws {

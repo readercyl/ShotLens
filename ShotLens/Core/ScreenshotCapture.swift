@@ -14,6 +14,7 @@ struct CapturedScreenshot {
 }
 
 struct FrozenScreenshot {
+    /// 框选完成前只保留内存图像，避免编码未使用的临时 PNG。
     let image: CGImage
     let screenRect: CGRect
 }
