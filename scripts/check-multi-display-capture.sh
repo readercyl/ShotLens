@@ -16,3 +16,9 @@ swiftc \
   -o "$TEST_BINARY"
 
 "$TEST_BINARY"
+
+rg -n '保留内存图像' "$ROOT_DIR/ShotLens/Core/ScreenshotCapture.swift" >/dev/null
+if sed -n '/struct FrozenScreenshot {/,/^}/p' "$ROOT_DIR/ShotLens/Core/ScreenshotCapture.swift" | rg 'fileURL' >/dev/null; then
+  echo "Frozen full-screen captures must not be encoded to an unused temporary PNG." >&2
+  exit 1
+fi

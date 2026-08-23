@@ -166,6 +166,12 @@ struct TranslationContentPlan {
     let sourceTexts: [String]
     private let blockPlans: [BlockPlan]
 
+    var shouldUseNearbyContext: Bool {
+        !sourceTexts.isEmpty
+            && sourceTexts.count <= 12
+            && sourceTexts.reduce(0) { $0 + $1.count } <= 600
+    }
+
     static func make(from blocks: [TextBlock]) -> TranslationContentPlan {
         var sourceTexts: [String] = []
         var blockPlans: [BlockPlan] = []
@@ -201,7 +207,52 @@ struct TranslationContentPlan {
     }
 }
 
+/// 从用户框选外围的少量 OCR 行提取只读语境。它们只帮助单词和短语消歧，
+/// 不进入翻译结果，也不会改变用户实际框选的渲染范围。
+enum TranslationContextBuilder {
+    static func make(
+        from blocks: [TextBlock],
+        excluding sourceTexts: [String],
+        maximumItems: Int = 8,
+        maximumCharacters: Int = 600
+    ) -> [String] {
+        let excluded = Set(sourceTexts.map(\.normalizedContextKey))
+        var seen = Set<String>()
+        var result: [String] = []
+        var characterCount = 0
+
+        let ordered = blocks.sorted {
+            if abs($0.boundingBox.minY - $1.boundingBox.minY) > 6 {
+                return $0.boundingBox.minY < $1.boundingBox.minY
+            }
+            return $0.boundingBox.minX < $1.boundingBox.minX
+        }
+        for block in ordered {
+            let text = block.text
+                .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = text.normalizedContextKey
+            guard text.containsLetterOrNumber,
+                  !key.isEmpty,
+                  !excluded.contains(key),
+                  seen.insert(key).inserted,
+                  result.count < maximumItems,
+                  characterCount + text.count <= maximumCharacters else {
+                continue
+            }
+            result.append(text)
+            characterCount += text.count
+        }
+        return result
+    }
+}
+
 private extension String {
+    var normalizedContextKey: String {
+        lowercased()
+            .replacingOccurrences(of: #"[\s\p{P}\p{S}]+"#, with: "", options: .regularExpression)
+    }
+
     var containsLetterOrNumber: Bool {
         unicodeScalars.contains { CharacterSet.alphanumerics.contains($0) }
     }

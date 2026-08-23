@@ -16,6 +16,9 @@ swiftc \
 
 rg -n -F 'ClipboardManager().copyImageToClipboard(image: displayCapture.image)' \
   "$ROOT_DIR/ShotLens/App/ShotLensApp.swift" >/dev/null
+rg -n -F 'writesPNG: false' "$ROOT_DIR/ShotLens/App/ShotLensApp.swift" >/dev/null
+rg -n -F 'defer { try? FileManager.default.removeItem(at: ocrFileURL) }' \
+  "$ROOT_DIR/ShotLens/App/ShotLensApp.swift" >/dev/null
 
 rg -n -F 'ClipboardManager().copyImageToClipboard(image: image)' \
   "$ROOT_DIR/ShotLens/Core/OverlayWindow.swift" >/dev/null

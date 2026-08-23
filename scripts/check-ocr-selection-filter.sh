@@ -25,6 +25,7 @@ swiftc \
 
 rg -n 'let originalBlocks = try recognizeTextBlocks' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
 rg -n 'mergeRecognitionPasses\(primary: originalBlocks, supplemental: enhancedBlocks\)' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
+rg -n 'shouldRunEnhancedPass\(primary: originalBlocks, image: image\)' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
 rg -n 'request\.usesLanguageCorrection = true' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
 rg -n 'request\.automaticallyDetectsLanguage = true' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
 rg -n 'supportedRecognitionLanguages\(\)' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null

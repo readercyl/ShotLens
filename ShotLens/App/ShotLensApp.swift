@@ -423,7 +423,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             displayCapture = try capture.crop(
                 frozenSnapshot: frozenSnapshot,
-                selection: selection
+                selection: selection,
+                writesPNG: false
             )
         } catch {
             displayCapture = nil
@@ -470,8 +471,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let ocr = OCREngine()
         let ocrStartedAt = Date()
         let textBlocks: [TextBlock]
+        guard let ocrFileURL = captured.fileURL else {
+            ShotLensLogger.log("OCR 失败：裁剪图没有临时文件")
+            overlay?.setMessage("识别失败")
+            return
+        }
         do {
-            textBlocks = try await ocr.recognize(imageFile: captured.fileURL)
+            defer { try? FileManager.default.removeItem(at: ocrFileURL) }
+            textBlocks = try await ocr.recognize(imageFile: ocrFileURL)
         } catch {
             ShotLensLogger.log("OCR 失败", error: error)
             overlay?.setMessage("识别失败")
@@ -502,31 +509,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlay?.setMessage("未识别到外语")
             return
         }
+        let contextTexts: [String]
+        if contentPlan.shouldUseNearbyContext {
+            let contextCandidates = textBlocks.filter {
+                !SelectionGeometry.shouldInclude($0.boundingBox, in: captured.userSelectionRectInImage)
+            }
+            contextTexts = TranslationContextBuilder.make(
+                from: contextCandidates,
+                excluding: contentPlan.sourceTexts
+            )
+        } else {
+            contextTexts = []
+        }
+        if !contextTexts.isEmpty {
+            ShotLensLogger.log("保留 \(contextTexts.count) 条框选外围 OCR 文本用于翻译消歧")
+        }
 
         configureTranslationRetry(
-            captured: captured,
-            displayPixelSize: displayPixelSize,
+            contentPlan: contentPlan,
+            contextTexts: contextTexts,
             overlay: overlay,
             settings: settings
         )
-        await translateRecognized(contentPlan, overlay: overlay, settings: settings, pipelineStartedAt: pipelineStartedAt)
+        await translateRecognized(
+            contentPlan,
+            contextTexts: contextTexts,
+            overlay: overlay,
+            settings: settings,
+            pipelineStartedAt: pipelineStartedAt
+        )
     }
 
     private func configureTranslationRetry(
-        captured: CapturedScreenshot,
-        displayPixelSize: CGSize,
+        contentPlan: TranslationContentPlan,
+        contextTexts: [String],
         overlay: OverlayWindow?,
         settings: TranslationSettings
     ) {
         let retry = { [weak self, weak overlay] in
             guard let self else { return }
-            ShotLensLogger.log("重新翻译：从现有框选截图重新执行 OCR 和翻译")
+            ShotLensLogger.log("重新翻译：复用现有 OCR 和语义分组，仅重新调用翻译 API")
             Task {
-                await self.translate(
-                    captured: captured,
-                    displayPixelSize: displayPixelSize,
+                await self.translateRecognized(
+                    contentPlan,
+                    contextTexts: contextTexts,
                     overlay: overlay,
-                    settings: settings
+                    settings: settings,
+                    pipelineStartedAt: Date()
                 )
             }
         }
@@ -536,6 +565,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func translateRecognized(
         _ contentPlan: TranslationContentPlan,
+        contextTexts: [String],
         overlay: OverlayWindow?,
         settings: TranslationSettings,
         pipelineStartedAt: Date
@@ -554,8 +584,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             translationResult = try await provider.translateAvailable(
                 texts,
+                context: contextTexts,
                 from: sourceLang,
-                to: targetLang
+                to: targetLang,
+                onProgress: { [weak overlay] partial in
+                    guard let partialBlocks = contentPlan.applyingAvailable(partial.translations),
+                          !partialBlocks.isEmpty else { return }
+                    overlay?.setTranslationProgress(
+                        partialBlocks,
+                        completedCount: partial.completedCount,
+                        totalCount: partial.translations.count
+                    )
+                }
             )
         } catch {
             ShotLensLogger.log("翻译失败", error: error)

@@ -137,6 +137,21 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     }
 
     @MainActor
+    func setTranslationProgress(
+        _ blocks: [TranslatedBlock],
+        completedCount: Int,
+        totalCount: Int
+    ) {
+        guard !blocks.isEmpty else { return }
+        controlPhase = .processing
+        isShowingTranslation = true
+        contentView?.setTranslatedBlocks(blocks)
+        contentView?.setDisplayMode(.translation)
+        statusWindow?.setMessage("正在翻译 \(completedCount)/\(totalCount)")
+        applyControlVisibility()
+    }
+
+    @MainActor
     func setTranslatedBlocks(_ blocks: [TranslatedBlock], isPartial: Bool = false) {
         controlPhase = .success
         isRetranslating = false

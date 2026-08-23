@@ -6,7 +6,8 @@ import ScreenCaptureKit
 
 struct CapturedScreenshot {
     let image: CGImage
-    let fileURL: URL
+    /// OCR helper 需要文件路径；只用于显示或剪贴板的裁剪不会落盘。
+    let fileURL: URL?
     /// 用户实际框选区域在裁剪图中的像素坐标。OCR 可使用外围上下文，
     /// 但最终只接纳与该区域相交的文字。
     let userSelectionRectInImage: CGRect
@@ -14,7 +15,6 @@ struct CapturedScreenshot {
 
 struct FrozenScreenshot {
     let image: CGImage
-    let fileURL: URL
     let screenRect: CGRect
 }
 
@@ -36,13 +36,10 @@ struct ScreenshotCapture {
             return nil
         }
         let image = try await captureDisplayImage(for: screen)
-        let outputURL = temporaryPNGURL()
-        try writePNG(image, to: outputURL)
-        ShotLensLogger.log("冻结屏幕：捕获鼠标所在显示器 \(screen.frame)，输出 \(outputURL.path)")
+        ShotLensLogger.log("冻结屏幕：捕获鼠标所在显示器 \(screen.frame)，保留内存图像")
 
         return FrozenScreenshot(
             image: image,
-            fileURL: outputURL,
             screenRect: screen.frame
         )
     }
@@ -50,7 +47,8 @@ struct ScreenshotCapture {
     func crop(
         frozenSnapshot: FrozenScreenshot,
         selection rect: CGRect,
-        userSelection: CGRect? = nil
+        userSelection: CGRect? = nil,
+        writesPNG: Bool = true
     ) throws -> CapturedScreenshot? {
         let scaleX = CGFloat(frozenSnapshot.image.width) / max(frozenSnapshot.screenRect.width, 1)
         let scaleY = CGFloat(frozenSnapshot.image.height) / max(frozenSnapshot.screenRect.height, 1)
@@ -80,8 +78,14 @@ struct ScreenshotCapture {
         }
 
         let normalizedImage = normalizedCopy(of: croppedImage) ?? croppedImage
-        let outputURL = temporaryPNGURL()
-        try writePNG(normalizedImage, to: outputURL)
+        let outputURL: URL?
+        if writesPNG {
+            let url = temporaryPNGURL()
+            try writePNG(normalizedImage, to: url)
+            outputURL = url
+        } else {
+            outputURL = nil
+        }
         let selectedRect = userSelection ?? rect
         let userRectInImage = CGRect(
             x: (selectedRect.minX - rect.minX) * scaleX,

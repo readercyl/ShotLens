@@ -12,6 +12,8 @@ struct TranslationBatchResult {
     }
 }
 
+typealias TranslationProgressHandler = @MainActor (TranslationBatchResult) -> Void
+
 /// 翻译引擎协议。ShotLens 只保留 OpenAI-compatible API 翻译。
 protocol TranslationProvider {
     /// 引擎名称，用于调试和未来 UI 展示
@@ -28,8 +30,10 @@ protocol TranslationProvider {
     /// 返回能够可靠映射的逐项译文；单项异常不丢弃同批次的其他成功结果。
     func translateAvailable(
         _ texts: [String],
+        context: [String],
         from sourceLanguage: String,
-        to targetLanguage: String
+        to targetLanguage: String,
+        onProgress: TranslationProgressHandler?
     ) async throws -> TranslationBatchResult
 }
 
@@ -38,6 +42,22 @@ extension TranslationProvider {
         _ texts: [String],
         from sourceLanguage: String,
         to targetLanguage: String
+    ) async throws -> TranslationBatchResult {
+        try await translateAvailable(
+            texts,
+            context: [],
+            from: sourceLanguage,
+            to: targetLanguage,
+            onProgress: nil
+        )
+    }
+
+    func translateAvailable(
+        _ texts: [String],
+        context _: [String],
+        from sourceLanguage: String,
+        to targetLanguage: String,
+        onProgress _: TranslationProgressHandler?
     ) async throws -> TranslationBatchResult {
         TranslationBatchResult(
             translations: try await translate(texts, from: sourceLanguage, to: targetLanguage).map(Optional.some)
