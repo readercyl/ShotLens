@@ -35,6 +35,28 @@ enum OverlayGeometry {
     }
 }
 
+enum OverlayStatusGeometry {
+    static func preferredSize(
+        titleWidth: CGFloat,
+        detailWidth: CGFloat,
+        actionWidth: CGFloat?,
+        hasDetail: Bool
+    ) -> CGSize {
+        let textWidth = min(220, max(titleWidth, detailWidth))
+        let buttonWidth = actionWidth ?? 0
+        let gap: CGFloat = actionWidth == nil ? 0 : 8
+        return CGSize(
+            width: min(max(76, ceil(textWidth) + 22 + buttonWidth + gap), 320),
+            height: hasDetail ? 50 : 32
+        )
+    }
+
+    static func textRect(in bounds: CGRect, actionFrame: CGRect?) -> CGRect {
+        let maxX = actionFrame.map { $0.minX - 8 } ?? bounds.maxX
+        return CGRect(x: 11, y: 0, width: max(1, maxX - 11), height: bounds.height)
+    }
+}
+
 /// 原位翻译结果层：选区内显示截图与译文，选区外点击即结束本次截图。
 final class OverlayWindow: NSObject, NSWindowDelegate {
     var onDismiss: (() -> Void)?
@@ -137,36 +159,87 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     }
 
     @MainActor
-    func setTranslatedBlocks(_ blocks: [TranslatedBlock], isPartial: Bool = false) {
+    func setTranslationProgress(
+        _ blocks: [TranslatedBlock],
+        completedCount: Int,
+        totalCount: Int
+    ) {
+        guard !blocks.isEmpty else { return }
+        let renderStartedAt = ProcessInfo.processInfo.systemUptime
+        controlPhase = .processing
+        isShowingTranslation = true
+        contentView?.setTranslatedBlocks(blocks)
+        contentView?.setDisplayMode(.translation)
+        statusWindow?.setMessage("正在翻译 \(completedCount)/\(totalCount)")
+        applyControlVisibility()
+        ShotLensLogger.event(
+            "overlay_progress_scheduled",
+            stage: "render",
+            outcome: "success",
+            fields: [
+                "completed_count": String(completedCount),
+                "total_count": String(totalCount),
+                "duration_ms": String(max(0, Int((ProcessInfo.processInfo.systemUptime - renderStartedAt) * 1_000)))
+            ]
+        )
+    }
+
+    @discardableResult
+    @MainActor
+    func setTranslatedBlocks(
+        _ blocks: [TranslatedBlock],
+        completedCount: Int,
+        totalCount: Int
+    ) -> Int {
+        let renderStartedAt = ProcessInfo.processInfo.systemUptime
         controlPhase = .success
         isRetranslating = false
         isShowingTranslation = true
-        translationStatusMessage = isPartial ? "部分完成" : "翻译完成"
+        translationStatusMessage = completedCount < totalCount
+            ? "已完成 \(completedCount)/\(totalCount)"
+            : "翻译完成"
         contentView?.setTranslatedBlocks(blocks)
         contentView?.setDisplayMode(.translation)
+        contentView?.displayIfNeeded()
         setToggleStatus(message: translationStatusMessage)
+        return max(0, Int((ProcessInfo.processInfo.systemUptime - renderStartedAt) * 1_000))
     }
 
     @MainActor
-    func setMessage(_ message: String) {
-        let isFailure = message.contains("失败")
-            || message.contains("未识别")
-            || message.contains("未配置")
-        controlPhase = isFailure ? .failure : .processing
+    func setFailure(
+        _ presentation: PipelineFailurePresentation,
+        keepsCurrentTranslation: Bool = false
+    ) {
+        controlPhase = .failure
         isRetranslating = false
         isShowingTranslation = true
-        contentView?.setTranslatedBlocks([])
+        if !keepsCurrentTranslation {
+            contentView?.setTranslatedBlocks([])
+        }
         contentView?.setDisplayMode(.translation)
-        if isFailure {
-            closeSaveWindow()
-            statusWindow?.setFailure(message: message, retryTitle: "重新翻译") { [weak self] in
+        closeSaveWindow()
+        if let actionTitle = presentation.actionTitle {
+            statusWindow?.setFailure(
+                title: presentation.title,
+                detail: presentation.detail,
+                actionTitle: actionTitle
+            ) { [weak self] in
                 self?.onRetry?()
             }
         } else {
-            statusWindow?.setMessage(message)
-            closeSaveWindow()
+            statusWindow?.setFailure(
+                title: presentation.title,
+                detail: presentation.detail,
+                actionTitle: nil,
+                onAction: nil
+            )
         }
         applyControlVisibility()
+    }
+
+    @MainActor
+    func requestDismiss() {
+        dismiss()
     }
 
     private func makeBackdropWindows() -> [OverlayBackdropWindow] {
@@ -348,7 +421,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
             return
         }
         ClipboardManager().copyImageToClipboard(image: image)
-        ShotLensLogger.log("截图已保存到剪贴板")
+        ShotLensLogger.event("overlay_snapshot_copied", stage: "clipboard", outcome: "success")
         dismiss()
     }
 
@@ -902,9 +975,14 @@ private final class OverlayStatusWindow: NSPanel {
         setFrame(statusFrame(size: size), display: true)
     }
 
-    func setFailure(message: String, retryTitle: String, onRetry: @escaping () -> Void) {
-        ignoresMouseEvents = false
-        statusView.setFailure(message: message, retryTitle: retryTitle, onRetry: onRetry)
+    func setFailure(
+        title: String,
+        detail: String,
+        actionTitle: String?,
+        onAction: (() -> Void)?
+    ) {
+        ignoresMouseEvents = actionTitle == nil
+        statusView.setFailure(title: title, detail: detail, actionTitle: actionTitle, onAction: onAction)
         let size = statusView.preferredSize
         statusView.frame = CGRect(origin: .zero, size: size)
         setFrame(statusFrame(size: size), display: true)
@@ -1019,22 +1097,26 @@ private final class OverlaySaveWindow: NSPanel {
 }
 
 private final class StatusContentView: NSView {
-    private var message = ""
+    private var title = ""
+    private var detail: String?
     private let retryButton = StatusRetryButton()
 
     override var isOpaque: Bool { false }
+    override var isFlipped: Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
 
     var preferredSize: CGSize {
-        let attrs: [NSAttributedString.Key: Any] = [
+        let titleWidth = (title as NSString).size(withAttributes: [
             .font: NSFont.systemFont(ofSize: 13, weight: .medium)
-        ]
-        let textSize = (message as NSString).size(withAttributes: attrs)
-        let buttonWidth: CGFloat = retryButton.isHidden ? 0 : retryButton.preferredWidth
-        let gap: CGFloat = retryButton.isHidden ? 0 : 8
-        return CGSize(
-            width: min(max(58, ceil(textSize.width) + 22 + buttonWidth + gap), 190),
-            height: 28
+        ]).width
+        let detailWidth = ((detail ?? "") as NSString).size(withAttributes: [
+            .font: NSFont.systemFont(ofSize: 11)
+        ]).width
+        return OverlayStatusGeometry.preferredSize(
+            titleWidth: titleWidth,
+            detailWidth: detailWidth,
+            actionWidth: retryButton.isHidden ? nil : retryButton.preferredWidth,
+            hasDetail: detail?.isEmpty == false
         )
     }
 
@@ -1049,18 +1131,27 @@ private final class StatusContentView: NSView {
     }
 
     func setMessage(_ message: String) {
-        self.message = message
+        title = message
+        detail = nil
         retryButton.isHidden = true
+        retryButton.isEnabled = false
         retryButton.onClick = nil
         needsLayout = true
         needsDisplay = true
     }
 
-    func setFailure(message: String, retryTitle: String, onRetry: @escaping () -> Void) {
-        self.message = message
-        retryButton.title = retryTitle
-        retryButton.isHidden = false
-        retryButton.onClick = onRetry
+    func setFailure(
+        title: String,
+        detail: String,
+        actionTitle: String?,
+        onAction: (() -> Void)?
+    ) {
+        self.title = title
+        self.detail = detail
+        retryButton.title = actionTitle ?? ""
+        retryButton.isHidden = actionTitle == nil
+        retryButton.isEnabled = actionTitle != nil
+        retryButton.onClick = onAction
         needsLayout = true
         needsDisplay = true
     }
@@ -1070,9 +1161,11 @@ private final class StatusContentView: NSView {
         toggleTitle: String,
         onToggle: @escaping () -> Void
     ) {
-        self.message = message
+        title = message
+        detail = nil
         retryButton.title = toggleTitle
         retryButton.isHidden = false
+        retryButton.isEnabled = true
         retryButton.onClick = onToggle
         needsLayout = true
         needsDisplay = true
@@ -1082,7 +1175,7 @@ private final class StatusContentView: NSView {
         super.layout()
         if !retryButton.isHidden {
             let width = retryButton.preferredWidth
-            retryButton.frame = NSRect(x: bounds.maxX - width - 8, y: 4, width: width, height: 20)
+            retryButton.frame = NSRect(x: bounds.maxX - width - 8, y: (bounds.height - 28) / 2, width: width, height: 28)
         }
     }
 
@@ -1090,41 +1183,85 @@ private final class StatusContentView: NSView {
         NSColor.black.withAlphaComponent(0.62).setFill()
         NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
 
-        let attrs: [NSAttributedString.Key: Any] = [
+        let titleAttributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 13, weight: .medium),
-            .foregroundColor: NSColor.white
+            .foregroundColor: NSColor.white,
+            .paragraphStyle: singleLineParagraphStyle
         ]
-        let textSize = (message as NSString).size(withAttributes: attrs)
-        let textMaxX = retryButton.isHidden ? bounds.maxX : retryButton.frame.minX - 8
-        let textMidX = (bounds.minX + textMaxX) / 2
-        let point = CGPoint(
-            x: textMidX - textSize.width / 2,
-            y: bounds.midY - textSize.height / 2
+        let textRect = OverlayStatusGeometry.textRect(
+            in: bounds,
+            actionFrame: retryButton.isHidden ? nil : retryButton.frame
         )
-        (message as NSString).draw(at: point, withAttributes: attrs)
+        if let detail, !detail.isEmpty {
+            (title as NSString).draw(in: CGRect(x: textRect.minX, y: 8, width: textRect.width, height: 17), withAttributes: titleAttributes)
+            let detailAttributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 11),
+                .foregroundColor: NSColor.white.withAlphaComponent(0.76),
+                .paragraphStyle: singleLineParagraphStyle
+            ]
+            (detail as NSString).draw(in: CGRect(x: textRect.minX, y: 27, width: textRect.width, height: 15), withAttributes: detailAttributes)
+        } else {
+            let titleSize = (title as NSString).size(withAttributes: titleAttributes)
+            (title as NSString).draw(
+                in: CGRect(x: textRect.minX, y: bounds.midY - titleSize.height / 2, width: textRect.width, height: titleSize.height + 1),
+                withAttributes: titleAttributes
+            )
+        }
+    }
+
+    private var singleLineParagraphStyle: NSParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingTail
+        return style
     }
 }
 
 private final class StatusRetryButton: NSControl {
     var title = "重新翻译" {
-        didSet { needsDisplay = true }
+        didSet {
+            toolTip = title
+            setAccessibilityLabel(title)
+            needsDisplay = true
+        }
     }
     var onClick: (() -> Void)?
+    private var isHovered = false { didSet { needsDisplay = true } }
+    private var isPressed = false { didSet { needsDisplay = true } }
 
     override var isOpaque: Bool { false }
     override var mouseDownCanMoveWindow: Bool { false }
+    override var acceptsFirstResponder: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setAccessibilityRole(.button)
+        focusRingType = .default
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func updateTrackingAreas() {
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSColor.white.withAlphaComponent(0.16).setFill()
+        NSColor.white.withAlphaComponent(isEnabled ? (isPressed ? 0.28 : (isHovered ? 0.22 : 0.16)) : 0.08).setFill()
         NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5).fill()
 
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: .medium),
-            .foregroundColor: NSColor.white
+            .foregroundColor: NSColor.white.withAlphaComponent(isEnabled ? 1 : 0.5)
         ]
         let size = (title as NSString).size(withAttributes: attrs)
         (title as NSString).draw(
@@ -1134,8 +1271,34 @@ private final class StatusRetryButton: NSControl {
     }
 
     override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        window?.makeFirstResponder(self)
+        isPressed = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isPressed else { return }
+        isPressed = false
+        if bounds.contains(convert(event.locationInWindow, from: nil)) {
+            performAction()
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 36 || event.keyCode == 49 {
+            performAction()
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    private func performAction() {
+        guard isEnabled else { return }
+        isEnabled = false
+        needsDisplay = true
         onClick?()
     }
+
 }
 
 private final class StatusActionButtonsView: NSView {
@@ -1160,6 +1323,12 @@ private final class StatusActionButtonsView: NSView {
         copyTextButton.toolTip = "复制译文"
         retranslateButton.toolTip = "重新翻译"
         saveButton.toolTip = "复制截图"
+        copyTextButton.setAccessibilityRole(.button)
+        copyTextButton.setAccessibilityLabel("复制译文")
+        retranslateButton.setAccessibilityRole(.button)
+        retranslateButton.setAccessibilityLabel("重新翻译")
+        saveButton.setAccessibilityRole(.button)
+        saveButton.setAccessibilityLabel("复制截图")
         addSubview(copyTextButton)
         addSubview(retranslateButton)
         addSubview(saveButton)
@@ -1669,13 +1838,37 @@ enum OverlayTranslationTextFit {
     }
 }
 
+private struct OverlayBackgroundCacheKey: Hashable {
+    let x: Int
+    let y: Int
+    let width: Int
+    let height: Int
+
+    init(_ rect: CGRect) {
+        x = Int((rect.minX * 10).rounded())
+        y = Int((rect.minY * 10).rounded())
+        width = Int((rect.width * 10).rounded())
+        height = Int((rect.height * 10).rounded())
+    }
+}
+
 final class OverlayContentView: NSView {
     var screenshot: CGImage? {
-        didSet { needsDisplay = true }
+        didSet {
+            restoredBackgroundCache.removeAll(keepingCapacity: true)
+            missingBackgroundCache.removeAll(keepingCapacity: true)
+            sampledColorCache.removeAll(keepingCapacity: true)
+            overflowLogCache.removeAll(keepingCapacity: true)
+            needsDisplay = true
+        }
     }
     var displayScale: CGFloat = 1.0
     var translatedBlocks: [TranslatedBlock] = []
     private var displayMode: OverlayDisplayMode = .translation
+    private var restoredBackgroundCache: [OverlayBackgroundCacheKey: CGImage] = [:]
+    private var missingBackgroundCache: Set<OverlayBackgroundCacheKey> = []
+    private var sampledColorCache: [OverlayBackgroundCacheKey: NSColor] = [:]
+    private var overflowLogCache: Set<OverlayBackgroundCacheKey> = []
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -1692,6 +1885,7 @@ final class OverlayContentView: NSView {
 
     func setTranslatedBlocks(_ blocks: [TranslatedBlock]) {
         translatedBlocks = blocks
+        overflowLogCache.removeAll(keepingCapacity: true)
         needsDisplay = true
     }
 
@@ -1785,9 +1979,18 @@ final class OverlayContentView: NSView {
                 paragraphStyle: paragraphStyle,
                 minimumSize: 0.25
             )
-            if !measurement.fits {
-                ShotLensLogger.log(
-                    String(format: "译文排版仍超出结果窗，字号 %.2f，需 %.1f/可用 %.1f", measurement.font.pointSize, measurement.requiredSize.height, flow.layoutRect.height)
+            let overflowKey = OverlayBackgroundCacheKey(flow.layoutRect)
+            if !measurement.fits, overflowLogCache.insert(overflowKey).inserted {
+                ShotLensLogger.event(
+                    "overlay_text_overflow",
+                    level: .warning,
+                    stage: "render",
+                    outcome: "degraded",
+                    fields: [
+                        "font_size": String(format: "%.2f", measurement.font.pointSize),
+                        "required_height": String(format: "%.1f", measurement.requiredSize.height),
+                        "available_height": String(format: "%.1f", flow.layoutRect.height)
+                    ]
                 )
             }
 
@@ -1861,11 +2064,25 @@ final class OverlayContentView: NSView {
         displayRect: CGRect
     ) {
         guard let screenshot else { return }
-        if let restored = OverlayTextBackgroundRestorer.restoredPatch(
-            from: screenshot,
-            pixelRect: block.original.boundingBox,
-            sourceStyle: block.original.visualStyle
-        ) {
+        let cacheKey = OverlayBackgroundCacheKey(block.original.boundingBox)
+        let restored: CGImage?
+        if let cached = restoredBackgroundCache[cacheKey] {
+            restored = cached
+        } else if missingBackgroundCache.contains(cacheKey) {
+            restored = nil
+        } else {
+            restored = OverlayTextBackgroundRestorer.restoredPatch(
+                from: screenshot,
+                pixelRect: block.original.boundingBox,
+                sourceStyle: block.original.visualStyle
+            )
+            if let restored {
+                restoredBackgroundCache[cacheKey] = restored
+            } else {
+                missingBackgroundCache.insert(cacheKey)
+            }
+        }
+        if let restored {
             let restoredPixelRect = OverlayTextBackgroundRestorer.restorationPixelRect(
                 for: block.original.boundingBox,
                 imageSize: screenshotSize
@@ -1882,8 +2099,14 @@ final class OverlayContentView: NSView {
     }
 
     private func sampledBackgroundColor(forPixelRect pixelRect: CGRect) -> NSColor {
+        let cacheKey = OverlayBackgroundCacheKey(pixelRect)
+        if let cached = sampledColorCache[cacheKey] {
+            return cached
+        }
         guard let screenshot else { return .windowBackgroundColor }
-        return screenshot.averageColor(in: pixelRect) ?? .windowBackgroundColor
+        let color = screenshot.averageColor(in: pixelRect) ?? .windowBackgroundColor
+        sampledColorCache[cacheKey] = color
+        return color
     }
 
     private func drawFallbackBackground(in displayRect: CGRect, forPixelRect pixelRect: CGRect) {

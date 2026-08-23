@@ -8,7 +8,12 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private var window: NSWindow?
     private var permissionStatusLabel: NSTextField?
     private var apiStatusLabel: NSTextField?
+    private var apiStatusDetailLabel: NSTextField?
     private var updateStatusLabel: NSTextField?
+    private var pipelineMessageContainer: NSStackView?
+    private var pipelineMessageTitleLabel: NSTextField?
+    private var pipelineMessageDetailLabel: NSTextField?
+    private var diagnosticsStatusLabel: NSTextField?
     private var launchAtLoginSwitch: BlueSwitchControl?
     private let checkUpdateButton = NSButton()
     private let installUpdateButton = NSButton()
@@ -34,7 +39,9 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         case unavailable
     }
     private var connectionState: ConnectionState = .untested
+    private var connectionDetailText: String?
     private var connectionTestTask: Task<Void, Never>?
+    private var modelFetchTask: Task<Void, Never>?
     private var updateTask: Task<Void, Never>?
     private var automaticUpdateCheckTimer: Timer?
     private var availableUpdate: AppUpdate?
@@ -127,10 +134,15 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         ])
 
         root.addArrangedSubview(makeHeader())
+        let pipelineMessage = makePipelineMessage()
+        pipelineMessage.isHidden = true
+        pipelineMessageContainer = pipelineMessage
+        root.addArrangedSubview(pipelineMessage)
         root.addArrangedSubview(makePermissionCard())
         root.addArrangedSubview(makeShortcutCard())
         root.addArrangedSubview(makeStartupCard())
         root.addArrangedSubview(makeAPICard())
+        root.addArrangedSubview(makeDiagnosticsCard())
         root.addArrangedSubview(makeFooter())
 
         updateAPIExpandedState()
@@ -321,6 +333,15 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         headerRow.addArrangedSubview(toggleAPIButton)
         card.addArrangedSubview(headerRow)
 
+        let statusDetail = label("", font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
+        statusDetail.lineBreakMode = .byWordWrapping
+        statusDetail.maximumNumberOfLines = 2
+        statusDetail.preferredMaxLayoutWidth = 366
+        statusDetail.widthAnchor.constraint(equalToConstant: 366).isActive = true
+        statusDetail.isHidden = true
+        apiStatusDetailLabel = statusDetail
+        card.addArrangedSubview(statusDetail)
+
         configureField(apiEndpointField, placeholder: "")
         configureField(modelField, placeholder: "")
 
@@ -355,6 +376,65 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         details.addArrangedSubview(actionRow)
 
         card.addArrangedSubview(details)
+        return card
+    }
+
+    private func makePipelineMessage() -> NSStackView {
+        let container = makeCard()
+        container.spacing = 3
+        container.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        container.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.08).cgColor
+        container.layer?.borderColor = NSColor.systemRed.withAlphaComponent(0.28).cgColor
+
+        let title = label("", font: .systemFont(ofSize: 13, weight: .semibold), color: .labelColor)
+        let detail = label("", font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
+        detail.lineBreakMode = .byWordWrapping
+        detail.maximumNumberOfLines = 2
+        detail.preferredMaxLayoutWidth = 374
+        title.widthAnchor.constraint(equalToConstant: 374).isActive = true
+        detail.widthAnchor.constraint(equalToConstant: 374).isActive = true
+        pipelineMessageTitleLabel = title
+        pipelineMessageDetailLabel = detail
+        container.addArrangedSubview(title)
+        container.addArrangedSubview(detail)
+        return container
+    }
+
+    private func makeDiagnosticsCard() -> NSView {
+        let card = makeCard()
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 8
+        row.widthAnchor.constraint(equalToConstant: 366).isActive = true
+
+        let textStack = NSStackView()
+        textStack.orientation = .vertical
+        textStack.alignment = .leading
+        textStack.spacing = 1
+        textStack.addArrangedSubview(label("诊断日志", font: .systemFont(ofSize: 14, weight: .medium)))
+        let status = label("不保存截图、原文或译文", font: .systemFont(ofSize: 11), color: .secondaryLabelColor)
+        diagnosticsStatusLabel = status
+        textStack.addArrangedSubview(status)
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let copyButton = NSButton(title: "复制诊断", target: self, action: #selector(copyDiagnosticsClicked))
+        copyButton.bezelStyle = .rounded
+        copyButton.widthAnchor.constraint(equalToConstant: 76).isActive = true
+        let openButton = NSButton(title: "打开日志", target: self, action: #selector(openDiagnosticsClicked))
+        openButton.bezelStyle = .rounded
+        openButton.widthAnchor.constraint(equalToConstant: 76).isActive = true
+        let clearButton = NSButton(title: "清空", target: self, action: #selector(clearDiagnosticsClicked))
+        clearButton.bezelStyle = .rounded
+        clearButton.widthAnchor.constraint(equalToConstant: 58).isActive = true
+
+        row.addArrangedSubview(textStack)
+        row.addArrangedSubview(spacer)
+        row.addArrangedSubview(copyButton)
+        row.addArrangedSubview(openButton)
+        row.addArrangedSubview(clearButton)
+        card.addArrangedSubview(row)
         return card
     }
 
@@ -438,11 +518,11 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         container.widthAnchor.constraint(equalToConstant: 318).isActive = true
         container.heightAnchor.constraint(equalToConstant: 28).isActive = true
 
-        // 文本框 290，眼图标间距 6
+        // 文本框 284，图标点击区 28，间距 6
         container.addSubview(apiKeyField)
         NSLayoutConstraint.activate([
             apiKeyField.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            apiKeyField.widthAnchor.constraint(equalToConstant: 290),
+            apiKeyField.widthAnchor.constraint(equalToConstant: 284),
             apiKeyField.centerYAnchor.constraint(equalTo: container.centerYAnchor),
             apiKeyField.heightAnchor.constraint(equalToConstant: 28),
         ])
@@ -457,8 +537,8 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         container.addSubview(apiKeyEyeButton)
         NSLayoutConstraint.activate([
             apiKeyEyeButton.leadingAnchor.constraint(equalTo: apiKeyField.trailingAnchor, constant: 6),
-            apiKeyEyeButton.widthAnchor.constraint(equalToConstant: 22),
-            apiKeyEyeButton.heightAnchor.constraint(equalToConstant: 22),
+            apiKeyEyeButton.widthAnchor.constraint(equalToConstant: 28),
+            apiKeyEyeButton.heightAnchor.constraint(equalToConstant: 28),
             apiKeyEyeButton.centerYAnchor.constraint(equalTo: container.centerYAnchor),
         ])
         updateApiKeyEyeIcon()
@@ -483,8 +563,11 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     private func updateApiKeyEyeIcon() {
         let symbolName = isApiKeyVisible ? "eye.slash" : "eye"
+        let label = isApiKeyVisible ? "隐藏 API Key" : "显示 API Key"
         let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
-        apiKeyEyeButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?.withSymbolConfiguration(config)
+        apiKeyEyeButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label)?.withSymbolConfiguration(config)
+        apiKeyEyeButton.toolTip = label
+        apiKeyEyeButton.setAccessibilityLabel(label)
     }
 
     func controlTextDidBeginEditing(_ obj: Notification) {
@@ -514,12 +597,12 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         container.widthAnchor.constraint(equalToConstant: 318).isActive = true
         container.heightAnchor.constraint(equalToConstant: 28).isActive = true
 
-        // 文本框 290，箭头在右侧间距 6
+        // 文本框 284，箭头点击区 28，间距 6
         modelField.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(modelField)
         NSLayoutConstraint.activate([
             modelField.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            modelField.widthAnchor.constraint(equalToConstant: 290),
+            modelField.widthAnchor.constraint(equalToConstant: 284),
             modelField.centerYAnchor.constraint(equalTo: container.centerYAnchor),
             modelField.heightAnchor.constraint(equalToConstant: 28),
         ])
@@ -536,10 +619,11 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         container.addSubview(modelArrowButton)
         NSLayoutConstraint.activate([
             modelArrowButton.leadingAnchor.constraint(equalTo: modelField.trailingAnchor, constant: 6),
-            modelArrowButton.widthAnchor.constraint(equalToConstant: 22),
-            modelArrowButton.heightAnchor.constraint(equalToConstant: 22),
+            modelArrowButton.widthAnchor.constraint(equalToConstant: 28),
+            modelArrowButton.heightAnchor.constraint(equalToConstant: 28),
             modelArrowButton.centerYAnchor.constraint(equalTo: container.centerYAnchor),
         ])
+        setArrowExpanded(false)
 
         row.addArrangedSubview(titleLabel)
         row.addArrangedSubview(container)
@@ -576,7 +660,10 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     private func updateWindowHeight(animated: Bool) {
         guard let window else { return }
-        let targetHeight: CGFloat = isApiDetailsExpanded ? 526 : 404
+        let baseHeight: CGFloat = isApiDetailsExpanded ? 586 : 464
+        let pipelineHeight: CGFloat = pipelineMessageContainer?.isHidden == false ? 62 : 0
+        let apiDetailHeight: CGFloat = apiStatusDetailLabel?.isHidden == false ? 30 : 0
+        let targetHeight = baseHeight + pipelineHeight + apiDetailHeight
         var frame = window.frame
         guard abs(frame.height - targetHeight) > 0.5 else { return }
         frame.origin.y += frame.height - targetHeight
@@ -613,6 +700,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
         // 不自动测试，等用户手动点击「测试」按钮
         connectionState = .untested
+        connectionDetailText = nil
         updateAPIExpandedState()
         updateWindowHeight(animated: false)
         refreshStatus()
@@ -652,6 +740,9 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             apiStatusLabel?.stringValue = "● 不可用"
             apiStatusLabel?.textColor = .systemRed
         }
+        apiStatusDetailLabel?.stringValue = connectionDetailText ?? ""
+        apiStatusDetailLabel?.isHidden = connectionDetailText?.isEmpty != false
+        updateWindowHeight(animated: false)
     }
 
     func currentDraftSettings() -> TranslationSettings {
@@ -666,7 +757,9 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         pendingSave?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            self.currentDraftSettings().save()
+            if !self.currentDraftSettings().save() {
+                self.showPipelineMessage("无法保存 API Key", detail: "钥匙串写入失败，原有 Key 未被覆盖。")
+            }
             self.refreshStatus()
         }
         pendingSave = workItem
@@ -674,6 +767,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     }
 
     @objc private func startCaptureClicked() {
+        hidePipelineMessage()
         flushPendingSave()
         onStartCapture?()
     }
@@ -699,7 +793,8 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             }
         } catch {
             launchAtLoginSwitch?.isOn = launchAtLoginEnabled
-            ShotLensLogger.log("更新开机自动启动失败", error: error)
+            ShotLensLogger.event("launch_at_login_update_failed", level: .error, stage: "settings", outcome: "failed", error: error)
+            showPipelineMessage("无法更新开机启动", detail: "系统没有接受此设置，请稍后再试。")
         }
     }
 
@@ -715,8 +810,15 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     @objc private func clearAPISettingsClicked() {
         pendingSave?.cancel()
-        TranslationSettings.clearSavedConfiguration()
+        connectionTestTask?.cancel()
+        connectionTestTask = nil
+        modelFetchTask?.cancel()
+        modelFetchTask = nil
+        if !TranslationSettings.clearSavedConfiguration() {
+            showPipelineMessage("无法清空 API Key", detail: "钥匙串没有接受删除请求，请稍后再试。")
+        }
         connectionState = .untested
+        connectionDetailText = nil
         availableModels = []
         apiKeyValue = ""
         isApiKeyVisible = false
@@ -788,10 +890,10 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             updateStatusLabel?.stringValue = "已是最新版"
             updateStatusLabel?.textColor = .secondaryLabelColor
             installUpdateButton.isHidden = true
-        case .failed:
+        case .failed(let message):
             guard showsProgress else { return }
             availableUpdate = nil
-            updateStatusLabel?.stringValue = "无法连接更新服务器"
+            updateStatusLabel?.stringValue = message
             updateStatusLabel?.textColor = .systemOrange
             installUpdateButton.isHidden = true
         }
@@ -841,28 +943,37 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
                         controller.updateStatusLabel?.stringValue = "安装中…"
                         try updater.installDownloadedUpdate(from: dmgURL)
                     } catch {
-                        controller.showUpdateInstallFailure()
+                        controller.showUpdateInstallFailure(reason: "无法启动安装程序")
                     }
                 }
             } catch {
                 guard let controller = self else { return }
                 await MainActor.run {
-                    controller.showUpdateInstallFailure()
+                    let reason = (error as? AppUpdaterError)?.errorDescription ?? "下载连接中断"
+                    controller.showUpdateInstallFailure(reason: reason)
                 }
             }
         }
     }
 
-    private func showUpdateInstallFailure() {
+    private func showUpdateInstallFailure(reason: String) {
         checkUpdateButton.isEnabled = true
         installUpdateButton.isEnabled = true
         checkUpdateButton.title = "检测新版本"
-        updateStatusLabel?.stringValue = "升级失败，请使用发布文档"
+        updateStatusLabel?.stringValue = "升级失败：\(reason)"
         updateStatusLabel?.textColor = .systemRed
+        ShotLensLogger.event("update_install_failed", level: .error, stage: "update", outcome: "failed")
     }
 
     private func markUntested() {
+        connectionTestTask?.cancel()
+        connectionTestTask = nil
+        modelFetchTask?.cancel()
+        modelFetchTask = nil
+        modelArrowButton.isEnabled = true
+        setArrowExpanded(false)
         connectionState = .untested
+        connectionDetailText = nil
         availableModels = []
         refreshStatus()
     }
@@ -903,17 +1014,25 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         connectionTestTask =
         Task { [weak self] in
             guard let self else { return }
-            let result = await LLMConnectionChecker(settings: settings).checkAvailability()
+            ShotLensLogger.event("api_connection_test_started", stage: "connection_test")
+            let report = await LLMConnectionChecker(settings: settings).checkReport()
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                switch result {
+                guard self.currentDraftSettings() == settings else { return }
+                switch report.result {
                 case .available:
                     self.connectionState = .available
+                    self.connectionDetailText = nil
                 case .transientFailure:
                     self.connectionState = .transientFailure
                 case .unavailable:
                     self.connectionState = .unavailable
                 }
+                if let kind = report.failureKind {
+                    let failure = PipelineFailurePresentation.make(kind: kind)
+                    self.connectionDetailText = "\(failure.title)：\(failure.detail)"
+                }
+                self.connectionTestTask = nil
                 self.refreshStatus()
             }
         }
@@ -924,10 +1043,9 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     @objc private func modelArrowClicked() {
         // 地址或 Key 为空时给短暂翻转反馈
         guard canTestConnection else {
-            setArrowExpanded(true)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
-                self?.setArrowExpanded(false)
-            }
+            connectionState = .notConfigured
+            connectionDetailText = "请先填写 API 地址和 Key。"
+            refreshStatus()
             return
         }
 
@@ -943,7 +1061,10 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private func setArrowExpanded(_ expanded: Bool) {
         let symbolName = expanded ? "chevron.up" : "chevron.down"
         let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
-        modelArrowButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?.withSymbolConfiguration(config)
+        let label = expanded ? "收起模型列表" : "打开模型列表"
+        modelArrowButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label)?.withSymbolConfiguration(config)
+        modelArrowButton.toolTip = label
+        modelArrowButton.setAccessibilityLabel(label)
     }
 
     private func fetchModels() {
@@ -962,21 +1083,39 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         request.httpMethod = "GET"
         request.setValue("Bearer \(settings.effectiveAPIKey)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 8
+        let host = url.host?.lowercased() ?? ""
+        if host == "api.xiaomimimo.com" || host.hasSuffix(".xiaomimimo.com") {
+            request.setValue(settings.effectiveAPIKey, forHTTPHeaderField: "api-key")
+        }
 
-        Task { [weak self] in
+        modelFetchTask?.cancel()
+        modelFetchTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let (data, _) = try await URLSession.shared.data(for: request)
-                let response = try JSONDecoder().decode(ModelListResponse.self, from: data)
+                let (data, response) = try await URLSession.shared.data(for: request)
+                if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                    throw ModelListFetchError.httpStatus(http.statusCode)
+                }
+                let modelResponse = try JSONDecoder().decode(ModelListResponse.self, from: data)
                 await MainActor.run {
-                    self.availableModels = response.data.map { $0.id }.sorted()
+                    guard !Task.isCancelled, self.currentDraftSettings() == settings else { return }
+                    self.availableModels = modelResponse.data.map { $0.id }.sorted()
                     self.modelArrowButton.isEnabled = true
+                    self.modelFetchTask = nil
+                    self.connectionDetailText = self.availableModels.isEmpty
+                        ? "服务没有返回可选模型，可以直接手动填写模型名称。"
+                        : nil
+                    self.refreshStatus()
                     self.showModelPicker()
                     self.setArrowExpanded(false)
                 }
             } catch {
                 await MainActor.run {
+                    guard !Task.isCancelled, self.currentDraftSettings() == settings else { return }
                     self.modelArrowButton.isEnabled = true
+                    self.modelFetchTask = nil
+                    self.connectionDetailText = self.modelListFailureMessage(for: error)
+                    self.refreshStatus()
                     self.setArrowExpanded(false)
                 }
             }
@@ -1012,6 +1151,75 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         let data: [ModelEntry]
         struct ModelEntry: Decodable {
             let id: String
+        }
+    }
+
+    private func modelListFailureMessage(for error: Error) -> String {
+        if let modelError = error as? ModelListFetchError,
+           case .httpStatus(let statusCode) = modelError {
+            if statusCode == 401 || statusCode == 403 {
+                return "模型列表验证失败，请检查 Key 或服务权限。"
+            }
+            if statusCode == 404 {
+                return "服务不提供模型列表，可以直接手动填写模型名称。"
+            }
+            if statusCode == 429 {
+                return "模型列表请求过多，请稍后再试。"
+            }
+            return "模型列表请求失败（HTTP \(statusCode)）。"
+        }
+        if let urlError = error as? URLError {
+            return urlError.code == .timedOut
+                ? "获取模型列表超时，可以直接手动填写模型名称。"
+                : "无法连接模型列表，可以直接手动填写模型名称。"
+        }
+        return "模型列表返回格式无效，可以直接手动填写模型名称。"
+    }
+
+    func showPipelineFailure(_ failure: PipelineFailurePresentation) {
+        showPipelineMessage(failure.title, detail: failure.detail)
+    }
+
+    func showPipelineMessage(_ title: String, detail: String) {
+        pipelineMessageTitleLabel?.stringValue = title
+        pipelineMessageDetailLabel?.stringValue = detail
+        pipelineMessageContainer?.isHidden = false
+        updateWindowHeight(animated: true)
+    }
+
+    private func hidePipelineMessage() {
+        guard pipelineMessageContainer?.isHidden == false else { return }
+        pipelineMessageContainer?.isHidden = true
+        updateWindowHeight(animated: true)
+    }
+
+    @objc private func copyDiagnosticsClicked() {
+        guard let text = ShotLensLogger.latestDiagnosticText(), !text.isEmpty else {
+            diagnosticsStatusLabel?.stringValue = "暂无诊断记录"
+            return
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        diagnosticsStatusLabel?.stringValue = "已复制最近诊断"
+    }
+
+    @objc private func openDiagnosticsClicked() {
+        do {
+            try ShotLensLogger.ensureDiagnosticDirectory()
+            NSWorkspace.shared.open(ShotLensLogger.diagnosticDirectoryURL)
+            diagnosticsStatusLabel?.stringValue = "已打开日志文件夹"
+        } catch {
+            diagnosticsStatusLabel?.stringValue = "无法打开日志文件夹"
+        }
+    }
+
+    @objc private func clearDiagnosticsClicked() {
+        do {
+            try ShotLensLogger.clearDiagnostics()
+            diagnosticsStatusLabel?.stringValue = "日志已清空"
+        } catch {
+            diagnosticsStatusLabel?.stringValue = "无法清空日志"
         }
     }
 
@@ -1054,13 +1262,28 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             }
         }
         pendingSave?.cancel()
-        currentDraftSettings().save()
+        if !currentDraftSettings().save() {
+            showPipelineMessage("无法保存 API Key", detail: "钥匙串写入失败，原有 Key 未被覆盖。")
+        }
         refreshStatus()
     }
 
     private func syncAPIKeyDraftFromField() {
         guard isApiKeyVisible else { return }
         apiKeyValue = apiKeyField.stringValue
+    }
+}
+
+private enum ModelListFetchError: Error, ShotLensDiagnosticError {
+    case httpStatus(Int)
+
+    var diagnosticCode: String { "models.http_error" }
+
+    var diagnosticMetadata: [String: String] {
+        switch self {
+        case .httpStatus(let statusCode):
+            return ["http_status": String(statusCode)]
+        }
     }
 }
 

@@ -3,6 +3,7 @@ import Foundation
 @main
 struct TranslationEndpointSmoke {
     static func main() async throws {
+        TranslationSettings.installSecretStoreForTesting(InMemoryTranslationSecretStore())
         URLProtocol.registerClass(MockOpenAIProtocol.self)
         defer { URLProtocol.unregisterClass(MockOpenAIProtocol.self) }
 
@@ -81,7 +82,10 @@ struct TranslationEndpointSmoke {
         try await assertSingleBlockHTTPHeadersAreFiltered()
         try await assertUnchangedSingleEnglishWordUsesLocalFallback()
         try await assertShortEnglishWordEchoIsRetried()
+        try await assertNonLatinEchoIsRetried()
         try await assertCommonShortUIWordUsesLocalFallback()
+        try await assertPunctuatedUIWordUsesRemoteTranslation()
+        try await assertAmbiguousWordUsesRemoteContext()
         try await assertTextShapePrompts()
         try await assertMixedLocalAndRemoteTranslationsAreReassembled()
         try await assertExactBatchUsesSessionCache()
@@ -90,6 +94,9 @@ struct TranslationEndpointSmoke {
         try await assertAbbreviationUsesSurroundingContext()
         try await assertArrowOutputAvoidsRepairRequest()
         try await assertLargeSelectionUsesBoundedBatches()
+        try await assertLargeSelectionUsesAtMostTwoConcurrentRequests()
+        try await assertLargeSelectionReportsPartialProgress()
+        try await assertRateLimitedConcurrentBatchFallsBackToSequentialRecovery()
         try await assertMalformedLargeBatchUsesOneBoundedRecovery()
         try await assertLongSemanticBlockSplitsAndReassembles()
         try await assertIndexedJSONStringsAreAlignedWithoutRepair()
@@ -100,7 +107,9 @@ struct TranslationEndpointSmoke {
         try await assertNestedArrayDoesNotDiscardTranslations()
         try await assertIncompleteJSONObjectKeepsIndexedTranslations()
         try await assertExistingChineseMustBePreserved()
+        try await assertJapaneseKanjiMayBeTranslated()
         try await assertExistingNumbersMustBePreserved()
+        try await assertURLsAndCodeMustBePreserved()
         try await assertProductIdentifierMayRemainUntranslated()
         try await assertPunctuatedIndexedJSONStaysSingleRequest()
         try await assertUntranslatedSentenceFailsAfterBoundedRetry()
@@ -110,6 +119,7 @@ struct TranslationEndpointSmoke {
         try await assertConnectionCheckAcceptsPlainTextMicroTranslation()
         try await assertConnectionCheckAcceptsMalformedTranslationContent()
         try await assertConnectionCheckRejectsHTTPError()
+        try await assertConnectionCheckExplainsMissingEndpointOrModel()
         try await assertConnectionCheckMarksRateLimitTransient()
 
         print("Translation endpoint smoke test passed.")
@@ -207,6 +217,10 @@ struct TranslationEndpointSmoke {
             apiKey: "custom-key",
             model: "custom-model"
         ).save()
+
+        guard defaults.object(forKey: TranslationSettings.apiKeyKey) == nil else {
+            throw TestFailure("API keys must not remain in UserDefaults after save")
+        }
 
         let loaded = TranslationSettings.load()
         guard loaded.apiEndpoint == "https://custom.example/v1",
@@ -308,9 +322,10 @@ struct TranslationEndpointSmoke {
             model: "test-model"
         ))
 
-        let result = await checker.checkAvailability()
-        guard result == .unavailable else {
-            throw TestFailure("Expected connection check to reject auth HTTP failures, got \(result)")
+        let report = await checker.checkReport()
+        guard report.result == .unavailable,
+              report.failureKind == .authenticationFailed else {
+            throw TestFailure("Expected connection check to expose an authentication failure, got \(report)")
         }
     }
 
@@ -324,9 +339,27 @@ struct TranslationEndpointSmoke {
             model: "test-model"
         ))
 
-        let result = await checker.checkAvailability()
-        guard result == .transientFailure else {
-            throw TestFailure("Expected connection check to treat 429 as transient, got \(result)")
+        let report = await checker.checkReport()
+        guard report.result == .transientFailure,
+              report.failureKind == .rateLimited else {
+            throw TestFailure("Expected connection check to expose a transient rate limit, got \(report)")
+        }
+    }
+
+    private static func assertConnectionCheckExplainsMissingEndpointOrModel() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.chatStatusCode = 404
+
+        let checker = LLMConnectionChecker(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "missing-model"
+        ))
+
+        let report = await checker.checkReport()
+        guard report.result == .unavailable,
+              report.failureKind == .endpointOrModelNotFound else {
+            throw TestFailure("Expected 404 to identify a missing endpoint or model, got \(report)")
         }
     }
 
@@ -452,6 +485,22 @@ struct TranslationEndpointSmoke {
         }
     }
 
+    private static func assertNonLatinEchoIsRetried() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContentQueue = ["Открыть настройки", "打开设置"]
+
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+
+        let result = try await translator.translate(["Открыть настройки"], from: "auto", to: "zh-Hans")
+        guard result == ["打开设置"], MockOpenAIProtocol.requestBodies.count == 2 else {
+            throw TestFailure("Expected an echoed non-Latin phrase to receive one bounded retry, got \(result)")
+        }
+    }
+
     private static func assertCommonShortUIWordUsesLocalFallback() async throws {
         MockOpenAIProtocol.reset()
         MockOpenAIProtocol.assistantContent = "Pricing"
@@ -462,12 +511,51 @@ struct TranslationEndpointSmoke {
             model: "test-model"
         ))
 
-        let result = try await translator.translate(["Pricing", "Updated", "Release"], from: "en", to: "zh-Hans")
-        guard result == ["价格", "已更新", "发布"] else {
+        let result = try await translator.translate(["Pricing", "Updated", "Cancel"], from: "en", to: "zh-Hans")
+        guard result == ["价格", "已更新", "取消"] else {
             throw TestFailure("Expected common UI words to use local fallbacks, got \(result)")
         }
         guard MockOpenAIProtocol.requestBodies.isEmpty else {
             throw TestFailure("Expected deterministic UI translation to skip the network")
+        }
+    }
+
+    private static func assertAmbiguousWordUsesRemoteContext() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContent = "0\t释放"
+
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+        let result = try await translator.translateAvailable(
+            ["Release"],
+            context: ["Release the mouse button to finish selecting"],
+            from: "auto",
+            to: "zh-Hans"
+        )
+        guard result.translations == ["释放"], MockOpenAIProtocol.requestBodies.count == 1 else {
+            throw TestFailure("Expected an ambiguous word to use remote context instead of the local glossary")
+        }
+        let body = MockOpenAIProtocol.requestBodies[0]
+        guard body.contains("CONTEXT ONLY"),
+              body.contains("Release the mouse button to finish selecting") else {
+            throw TestFailure("Expected surrounding OCR text to be sent as non-output context")
+        }
+    }
+
+    private static func assertPunctuatedUIWordUsesRemoteTranslation() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContent = "0\t设置："
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+        let result = try await translator.translate(["Settings:"], from: "en", to: "zh-Hans")
+        guard result == ["设置："], MockOpenAIProtocol.requestBodies.count == 1 else {
+            throw TestFailure("Punctuated UI text must not lose punctuation through the local glossary")
         }
     }
 
@@ -658,15 +746,14 @@ struct TranslationEndpointSmoke {
 
     private static func assertLargeSelectionUsesBoundedBatches() async throws {
         MockOpenAIProtocol.reset()
-        let input = (0..<48).map { index in
-            String(repeating: "Source text for bounded batch ", count: 4) + "\(index)"
+        let input = (0..<48).map { _ in
+            String(repeating: "Source text for bounded batch ", count: 4)
         }
-        let expected = (0..<48).map { "译文\($0)" }
-        let firstBatch = Array(expected[0..<24])
-        let secondBatch = Array(expected[24..<48])
+        let oneBatch = (0..<24).map { "译文\($0)" }
+        let expected = oneBatch + oneBatch
         MockOpenAIProtocol.assistantContentQueue = [
-            String(data: try JSONSerialization.data(withJSONObject: firstBatch), encoding: .utf8)!,
-            String(data: try JSONSerialization.data(withJSONObject: secondBatch), encoding: .utf8)!
+            String(data: try JSONSerialization.data(withJSONObject: oneBatch), encoding: .utf8)!,
+            String(data: try JSONSerialization.data(withJSONObject: oneBatch), encoding: .utf8)!
         ]
 
         let translator = LLMTranslator(settings: TranslationSettings(
@@ -677,6 +764,83 @@ struct TranslationEndpointSmoke {
         let result = try await translator.translate(input, from: "en", to: "zh-Hans")
         guard result == expected, MockOpenAIProtocol.requestBodies.count == 2 else {
             throw TestFailure("Expected a large selection to use two bounded requests, requests=\(MockOpenAIProtocol.requestBodies.count)")
+        }
+    }
+
+    private static func assertLargeSelectionUsesAtMostTwoConcurrentRequests() async throws {
+        MockOpenAIProtocol.reset()
+        let input = (0..<48).map { _ in "Concurrent source item with enough words" }
+        let oneBatch = (0..<24).map { "并发译文\($0)" }
+        MockOpenAIProtocol.assistantContent = String(
+            data: try JSONSerialization.data(withJSONObject: oneBatch),
+            encoding: .utf8
+        )!
+        MockOpenAIProtocol.responseDelay = 0.05
+
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+        let result = try await translator.translate(input, from: "en", to: "zh-Hans")
+        guard result.count == 48,
+              MockOpenAIProtocol.maximumConcurrentRequests == 2 else {
+            throw TestFailure(
+                "Expected a large selection to use exactly two controlled concurrent requests, max=\(MockOpenAIProtocol.maximumConcurrentRequests)"
+            )
+        }
+    }
+
+    @MainActor
+    private static func assertLargeSelectionReportsPartialProgress() async throws {
+        MockOpenAIProtocol.reset()
+        let input = (0..<48).map { _ in "Progressive source item with enough words" }
+        let oneBatch = (0..<24).map { "渐进译文\($0)" }
+        MockOpenAIProtocol.assistantContent = String(
+            data: try JSONSerialization.data(withJSONObject: oneBatch),
+            encoding: .utf8
+        )!
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+        var progressCounts: [Int] = []
+        let result = try await translator.translateAvailable(
+            input,
+            context: [],
+            from: "en",
+            to: "zh-Hans",
+            onProgress: { progressCounts.append($0.completedCount) }
+        )
+        guard result.isComplete,
+              progressCounts.contains(24),
+              progressCounts.allSatisfy({ $0 < 48 }) else {
+            throw TestFailure("Expected a large selection to expose a partial result before completion: \(progressCounts)")
+        }
+    }
+
+    private static func assertRateLimitedConcurrentBatchFallsBackToSequentialRecovery() async throws {
+        MockOpenAIProtocol.reset()
+        let input = (0..<48).map { _ in "Rate limited source item with enough words" }
+        let oneBatch = (0..<24).map { "限流恢复译文\($0)" }
+        MockOpenAIProtocol.assistantContent = String(
+            data: try JSONSerialization.data(withJSONObject: oneBatch),
+            encoding: .utf8
+        )!
+        MockOpenAIProtocol.statusCodeQueue = [200, 429, 200]
+        MockOpenAIProtocol.responseDelay = 0.02
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+
+        let result = try await translator.translate(input, from: "en", to: "zh-Hans")
+        guard result.count == 48,
+              MockOpenAIProtocol.requestBodies.count == 3,
+              MockOpenAIProtocol.maximumConcurrentRequests == 2 else {
+            throw TestFailure("Expected a 429 batch to recover once after two-way concurrency")
         }
     }
 
@@ -897,6 +1061,41 @@ struct TranslationEndpointSmoke {
         }
     }
 
+    private static func assertJapaneseKanjiMayBeTranslated() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContent = "0\t打开设置"
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+
+        let result = try await translator.translate(["設定を開く"], from: "auto", to: "zh-Hans")
+        guard result == ["打开设置"], MockOpenAIProtocol.requestBodies.count == 1 else {
+            throw TestFailure("Japanese Kanji must not be mistaken for protected source Chinese: \(result)")
+        }
+
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContent = "0\t保留中文，打开设置"
+        let mixedResult = try await translator.translate(["保留中文 設定を開く"], from: "auto", to: "zh-Hans")
+        guard mixedResult == ["保留中文，打开设置"] else {
+            throw TestFailure("Expected genuine Chinese to remain protected next to translated Japanese")
+        }
+
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContent = "0\t打开设置"
+        do {
+            _ = try await translator.translate(["保留中文 設定を開く"], from: "auto", to: "zh-Hans")
+            throw TestFailure("Expected mixed Japanese translation that drops genuine Chinese to fail")
+        } catch is TestFailure {
+            throw TestFailure("Expected mixed Japanese translation that drops genuine Chinese to fail")
+        } catch {
+            guard MockOpenAIProtocol.requestBodies.count == 2 else {
+                throw TestFailure("Mixed Japanese/Chinese preservation failure should receive one bounded retry")
+            }
+        }
+    }
+
     private static func assertExistingNumbersMustBePreserved() async throws {
         MockOpenAIProtocol.reset()
         MockOpenAIProtocol.assistantContent = "0\t节省费用并立即开始"
@@ -914,6 +1113,29 @@ struct TranslationEndpointSmoke {
             guard MockOpenAIProtocol.requestBodies.count == 2 else {
                 throw TestFailure("Number-preservation failure should receive one bounded retry")
             }
+        }
+    }
+
+    private static func assertURLsAndCodeMustBePreserved() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContentQueue = [
+            "0\t打开文档并运行测试",
+            "0\t打开 https://example.com/docs?q=1 并运行 `npm test`"
+        ]
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+
+        let result = try await translator.translate(
+            ["Open https://example.com/docs?q=1 and run `npm test`"],
+            from: "en",
+            to: "zh-Hans"
+        )
+        guard result == ["打开 https://example.com/docs?q=1 并运行 `npm test`"],
+              MockOpenAIProtocol.requestBodies.count == 2 else {
+            throw TestFailure("Expected omitted URLs and code spans to trigger one bounded retry: \(result)")
         }
     }
 
@@ -980,6 +1202,14 @@ struct TranslationEndpointSmoke {
     }
 }
 
+private final class InMemoryTranslationSecretStore: TranslationSecretStore {
+    private var value: String?
+
+    func load() throws -> String? { value }
+    func save(_ value: String) throws { self.value = value }
+    func clear() throws { value = nil }
+}
+
 private final class MockOpenAIProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var hosts: [String] = []
@@ -988,11 +1218,14 @@ private final class MockOpenAIProtocol: URLProtocol {
     private static var apiKeys: [String] = []
     private static var bodies: [String] = []
     private static var timeouts: [TimeInterval] = []
+    private static var activeRequests = 0
+    private static var maxConcurrentRequests = 0
     static var assistantContent = "0\t你好\n1\t世界"
     static var assistantContentQueue: [String] = []
     static var chatStatusCode = 200
     static var modelsStatusCode = 200
     static var statusCodeQueue: [Int] = []
+    static var responseDelay: TimeInterval = 0
 
     static var requestedHosts: [String] {
         lock.lock()
@@ -1030,6 +1263,12 @@ private final class MockOpenAIProtocol: URLProtocol {
         return timeouts
     }
 
+    static var maximumConcurrentRequests: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return maxConcurrentRequests
+    }
+
     static func reset() {
         LLMTranslator.resetSessionCacheForTesting()
         lock.lock()
@@ -1039,11 +1278,14 @@ private final class MockOpenAIProtocol: URLProtocol {
         apiKeys = []
         bodies = []
         timeouts = []
+        activeRequests = 0
+        maxConcurrentRequests = 0
         assistantContent = "0\t你好\n1\t世界"
         assistantContentQueue = []
         chatStatusCode = 200
         modelsStatusCode = 200
         statusCodeQueue = []
+        responseDelay = 0
         lock.unlock()
     }
 
@@ -1060,6 +1302,8 @@ private final class MockOpenAIProtocol: URLProtocol {
     override func startLoading() {
         let path = request.url?.path ?? ""
         let content: String
+        let statusCode: Int
+        let delay: TimeInterval
         Self.lock.lock()
         if Self.assistantContentQueue.isEmpty {
             content = Self.assistantContent
@@ -1072,9 +1316,6 @@ private final class MockOpenAIProtocol: URLProtocol {
         Self.apiKeys.append(request.value(forHTTPHeaderField: "api-key") ?? "")
         Self.bodies.append(Self.bodyString(from: request))
         Self.timeouts.append(request.timeoutInterval)
-        Self.lock.unlock()
-
-        let statusCode: Int
         if !Self.statusCodeQueue.isEmpty {
             statusCode = Self.statusCodeQueue.removeFirst()
         } else if path == "/v1/chat/completions" || path == "/chat/completions" {
@@ -1084,6 +1325,11 @@ private final class MockOpenAIProtocol: URLProtocol {
         } else {
             statusCode = 404
         }
+        delay = Self.responseDelay
+        Self.activeRequests += 1
+        Self.maxConcurrentRequests = max(Self.maxConcurrentRequests, Self.activeRequests)
+        Self.lock.unlock()
+
         let body: String = statusCode == 200
             ? try! String(data: JSONSerialization.data(withJSONObject: [
                 "choices": [
@@ -1102,9 +1348,19 @@ private final class MockOpenAIProtocol: URLProtocol {
             httpVersion: "HTTP/1.1",
             headerFields: ["Content-Type": "application/json"]
         )!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(body.utf8))
-        client?.urlProtocolDidFinishLoading(self)
+        let finish = { [self] in
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(body.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+            Self.lock.lock()
+            Self.activeRequests -= 1
+            Self.lock.unlock()
+        }
+        if delay > 0 {
+            DispatchQueue.global().asyncAfter(deadline: .now() + delay, execute: finish)
+        } else {
+            finish()
+        }
     }
 
     override func stopLoading() {}

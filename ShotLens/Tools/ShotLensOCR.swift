@@ -37,11 +37,34 @@ struct ShotLensOCR {
         }
 
         let originalBlocks = try recognizeTextBlocks(in: image, sourceImage: image, allowEdgeText: allowEdgeText)
+        guard shouldRunEnhancedPass(primary: originalBlocks, image: image) else {
+            return originalBlocks
+        }
         guard let enhanced = enhancedRecognitionImage(from: image) else {
             return originalBlocks
         }
         let enhancedBlocks = try recognizeTextBlocks(in: enhanced, sourceImage: image, allowEdgeText: allowEdgeText)
         return mergeRecognitionPasses(primary: originalBlocks, supplemental: enhancedBlocks)
+    }
+
+    /// 单词和单行高置信截图直接采用原图；分散小文本仍保留增强补漏，
+    /// 大面积高置信截图则跳过第二次 Vision 请求，避免面积越大等待越久。
+    private static func shouldRunEnhancedPass(primary: [OCRBlockDTO], image: CGImage) -> Bool {
+        guard !primary.isEmpty else { return true }
+        if primary.count == 1, primary[0].visualStyle.confidence >= 0.82 {
+            return false
+        }
+
+        let pixelCount = image.width * image.height
+        if pixelCount <= 1_500_000 {
+            return true
+        }
+        let averageConfidence = primary.reduce(Float.zero) {
+            $0 + $1.visualStyle.confidence
+        } / Float(primary.count)
+        let lowConfidenceCount = primary.filter { $0.visualStyle.confidence < 0.62 }.count
+        return averageConfidence < 0.80
+            || Double(lowConfidenceCount) / Double(primary.count) >= 0.20
     }
 
     /// 原图结果优先，增强图只补回浅色漏字；只有置信度显著更高时才替换同位置结果。
@@ -124,7 +147,13 @@ struct ShotLensOCR {
     private static func supportedRecognitionLanguages() -> [String] {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
-        return (try? request.supportedRecognitionLanguages()) ?? ["en-US", "zh-Hans"]
+        let supported = (try? request.supportedRecognitionLanguages()) ?? ["en-US", "zh-Hans"]
+        let preferred = [
+            "en-US", "zh-Hans", "zh-Hant", "ja-JP", "ko-KR",
+            "fr-FR", "de-DE", "es-ES", "pt-BR", "ru-RU", "it-IT"
+        ]
+        let preferredSupported = preferred.filter(supported.contains)
+        return preferredSupported + supported.filter { !preferredSupported.contains($0) }
     }
 
     private static func bestCandidate(from observation: VNRecognizedTextObservation) -> VNRecognizedText? {

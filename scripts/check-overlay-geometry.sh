@@ -11,6 +11,7 @@ swiftc \
   "$ROOT_DIR/ShotLens/Models/TranslationResult.swift" \
   "$ROOT_DIR/ShotLens/Core/ClipboardManager.swift" \
   "$ROOT_DIR/ShotLens/Core/ShotLensLogger.swift" \
+  "$ROOT_DIR/ShotLens/Core/TranslationPipelineState.swift" \
   "$ROOT_DIR/ShotLens/Core/ScreenshotCapture.swift" \
   "$ROOT_DIR/ShotLens/Core/OverlayControlVisibility.swift" \
   "$ROOT_DIR/ShotLens/Core/OverlayPinAppearance.swift" \

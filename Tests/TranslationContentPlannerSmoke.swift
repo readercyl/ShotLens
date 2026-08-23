@@ -14,6 +14,8 @@ struct TranslationContentPlannerSmoke {
         try assertSeparatedEnglishRunsDoNotCoverProtectedText()
         try assertCommonNonLatinLanguagesAreIncluded()
         try assertPartialTranslationsKeepIndependentBlocks()
+        try assertNearbyRingTextBecomesBoundedContext()
+        try assertNearbyContextIsLimitedToShortSelections()
         try assertWrappedHeadingAndParagraphFormSemanticBlocks()
         try assertColumnsStayIndependent()
         try assertSentenceContinuationMergesWithoutAbsorbingNearbyLegend()
@@ -142,6 +144,29 @@ struct TranslationContentPlannerSmoke {
         let translated = plan.applyingAvailable(["版本更新", nil, "功能说明"])
         guard translated?.map(\.translatedText) == ["版本更新", "功能说明"] else {
             throw TestFailure("Unavailable items must not discard independent successful blocks")
+        }
+    }
+
+    private static func assertNearbyRingTextBecomesBoundedContext() throws {
+        let context = TranslationContextBuilder.make(
+            from: [
+                block("Release the mouse button to finish selecting", x: 10, y: 5),
+                block("Release", x: 10, y: 40),
+                block("Release the mouse button to finish selecting", x: 10, y: 75),
+                block("● ± □", x: 10, y: 110)
+            ],
+            excluding: ["Release"]
+        )
+        guard context == ["Release the mouse button to finish selecting"] else {
+            throw TestFailure("Expected nearby OCR ring text to become deduplicated context only: \(context)")
+        }
+    }
+
+    private static func assertNearbyContextIsLimitedToShortSelections() throws {
+        let shortPlan = TranslationContentPlan.make(from: [block("Release")])
+        let longPlan = TranslationContentPlan.make(from: [block(String(repeating: "Long document text ", count: 40))])
+        guard shortPlan.shouldUseNearbyContext, !longPlan.shouldUseNearbyContext else {
+            throw TestFailure("Nearby OCR context must be limited to short selections")
         }
     }
 

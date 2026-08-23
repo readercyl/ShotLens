@@ -37,6 +37,10 @@ rg -n 'scheduleAutomaticUpdateChecks' "$MAIN_WINDOW" >/dev/null
 rg -n 'performAutomaticUpdateCheckIfNeeded' "$MAIN_WINDOW" >/dev/null
 rg -n 'automaticallyInstalls: true' "$MAIN_WINDOW" >/dev/null
 rg -n 'canAutomaticallyInstall' "$MAIN_WINDOW" >/dev/null
+MARK_UNTESTED_BLOCK="$(sed -n '/private func markUntested()/,/^    }/p' "$MAIN_WINDOW")"
+grep -F 'modelFetchTask?.cancel()' <<<"$MARK_UNTESTED_BLOCK" >/dev/null
+grep -F 'modelArrowButton.isEnabled = true' <<<"$MARK_UNTESTED_BLOCK" >/dev/null
+grep -F 'setArrowExpanded(false)' <<<"$MARK_UNTESTED_BLOCK" >/dev/null
 
 if rg -n 'showReleaseNotesIfNeeded|lastShownReleaseNotesVersionKey|更新完成' "$SHOTLENS_APP" >/dev/null; then
   echo "App launch must not show automatic release/update reminder popups." >&2
@@ -75,15 +79,23 @@ rg -n -U 'if !isPinned \{\n\s+rebindControlWindows\(\)' "$OVERLAY_WINDOW" >/dev/
 rg -n 'resultWindow\?\.removeChildWindow\(saveWindow\)' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'dismissFromOutsideClick' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'onRetranslate' "$OVERLAY_WINDOW" "$SHOTLENS_APP" >/dev/null
-rg -n 'overlay\.onRetranslate = overlay\.onRetry' "$SHOTLENS_APP" >/dev/null
-RETRY_BLOCK="$(sed -n '/overlay\.onRetry =/,/overlay\.onRetranslate =/p' "$SHOTLENS_APP")"
-grep -F 'await self.translate(' <<<"$RETRY_BLOCK" >/dev/null
+rg -n 'overlay\.onRetry = retryOCR' "$SHOTLENS_APP" >/dev/null
+rg -n 'overlay\.onRetranslate = retryOCR' "$SHOTLENS_APP" >/dev/null
+RETRY_BLOCK="$(sed -n '/let retryOCR:/,/overlay\.onRetranslate = retryOCR/p' "$SHOTLENS_APP")"
+grep -F 'startOCRTranslationAttempt(' <<<"$RETRY_BLOCK" >/dev/null
 grep -F 'captured: ocrCapture' <<<"$RETRY_BLOCK" >/dev/null
 if grep -E 'captureFrozenDisplay|executeTranslationFlow|startCapture' <<<"$RETRY_BLOCK" >/dev/null; then
   echo "Retranslate must re-run OCR from the existing captured image without taking a new screenshot." >&2
   exit 1
 fi
 rg -n 'translateRecognized' "$SHOTLENS_APP" >/dev/null
+rg -n 'ocr\.recognize\(image: captured\.image\)' "$SHOTLENS_APP" >/dev/null
+rg -n 'translationAttemptGate' "$SHOTLENS_APP" >/dev/null
+rg -n 'setFailure\(PipelineFailurePresentation' "$SHOTLENS_APP" >/dev/null
+if rg -n 'message\.contains\("失败"\)|classifyFailure' "$OVERLAY_WINDOW" >/dev/null; then
+  echo "Overlay failures must use typed failure presentations, not message substring matching." >&2
+  exit 1
+fi
 if rg -n 'NSApp\.activate\(ignoringOtherApps: true\)' "$OVERLAY_WINDOW" >/dev/null; then
   echo "Result overlay must not activate the main app because activation can switch away from fullscreen Spaces." >&2
   exit 1
@@ -112,6 +124,8 @@ rg -n 'OverlayGeometry\.displayRect' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'OverlayTranslationLayout\.makeFlows' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'OverlayTranslationTextFit\.measure' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'OverlayTextBackgroundRestorer\.restoredPatch' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'restoredBackgroundCache' "$OVERLAY_WINDOW" >/dev/null
+rg -n 'sampledColorCache' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'drawFallbackBackground' "$OVERLAY_WINDOW" >/dev/null
 rg -n -U '} else \{\n\s+drawFallbackBackground' "$OVERLAY_WINDOW" >/dev/null
 rg -n 'sampledBackgroundColor' "$OVERLAY_WINDOW" >/dev/null
