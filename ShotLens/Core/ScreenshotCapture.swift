@@ -36,7 +36,15 @@ struct ScreenshotCapture {
             return nil
         }
         let image = try await captureDisplayImage(for: screen)
-        ShotLensLogger.log("冻结屏幕：捕获鼠标所在显示器 \(screen.frame)，保留内存图像")
+        ShotLensLogger.event(
+            "capture_display_resolved",
+            stage: "capture",
+            outcome: "success",
+            fields: [
+                "image_width": String(image.width),
+                "image_height": String(image.height)
+            ]
+        )
 
         return FrozenScreenshot(
             image: image,

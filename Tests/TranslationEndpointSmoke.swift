@@ -3,6 +3,7 @@ import Foundation
 @main
 struct TranslationEndpointSmoke {
     static func main() async throws {
+        TranslationSettings.installSecretStoreForTesting(InMemoryTranslationSecretStore())
         URLProtocol.registerClass(MockOpenAIProtocol.self)
         defer { URLProtocol.unregisterClass(MockOpenAIProtocol.self) }
 
@@ -118,6 +119,7 @@ struct TranslationEndpointSmoke {
         try await assertConnectionCheckAcceptsPlainTextMicroTranslation()
         try await assertConnectionCheckAcceptsMalformedTranslationContent()
         try await assertConnectionCheckRejectsHTTPError()
+        try await assertConnectionCheckExplainsMissingEndpointOrModel()
         try await assertConnectionCheckMarksRateLimitTransient()
 
         print("Translation endpoint smoke test passed.")
@@ -215,6 +217,10 @@ struct TranslationEndpointSmoke {
             apiKey: "custom-key",
             model: "custom-model"
         ).save()
+
+        guard defaults.object(forKey: TranslationSettings.apiKeyKey) == nil else {
+            throw TestFailure("API keys must not remain in UserDefaults after save")
+        }
 
         let loaded = TranslationSettings.load()
         guard loaded.apiEndpoint == "https://custom.example/v1",
@@ -316,9 +322,10 @@ struct TranslationEndpointSmoke {
             model: "test-model"
         ))
 
-        let result = await checker.checkAvailability()
-        guard result == .unavailable else {
-            throw TestFailure("Expected connection check to reject auth HTTP failures, got \(result)")
+        let report = await checker.checkReport()
+        guard report.result == .unavailable,
+              report.failureKind == .authenticationFailed else {
+            throw TestFailure("Expected connection check to expose an authentication failure, got \(report)")
         }
     }
 
@@ -332,9 +339,27 @@ struct TranslationEndpointSmoke {
             model: "test-model"
         ))
 
-        let result = await checker.checkAvailability()
-        guard result == .transientFailure else {
-            throw TestFailure("Expected connection check to treat 429 as transient, got \(result)")
+        let report = await checker.checkReport()
+        guard report.result == .transientFailure,
+              report.failureKind == .rateLimited else {
+            throw TestFailure("Expected connection check to expose a transient rate limit, got \(report)")
+        }
+    }
+
+    private static func assertConnectionCheckExplainsMissingEndpointOrModel() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.chatStatusCode = 404
+
+        let checker = LLMConnectionChecker(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "missing-model"
+        ))
+
+        let report = await checker.checkReport()
+        guard report.result == .unavailable,
+              report.failureKind == .endpointOrModelNotFound else {
+            throw TestFailure("Expected 404 to identify a missing endpoint or model, got \(report)")
         }
     }
 
@@ -1175,6 +1200,14 @@ struct TranslationEndpointSmoke {
             defaults.removeObject(forKey: key)
         }
     }
+}
+
+private final class InMemoryTranslationSecretStore: TranslationSecretStore {
+    private var value: String?
+
+    func load() throws -> String? { value }
+    func save(_ value: String) throws { self.value = value }
+    func clear() throws { value = nil }
 }
 
 private final class MockOpenAIProtocol: URLProtocol {

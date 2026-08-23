@@ -17,6 +17,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var resultOverlay: OverlayWindow?
     private var activeSelectionOverlay: InProcessSelectionOverlay?
     private var isProcessing = false
+    private var activeFlowTask: Task<Void, Never>?
+    private var activeTranslationTask: Task<Void, Never>?
+    private var translationAttemptGate = PipelineAttemptGate()
+    private var translationAttemptNumber = 0
+    private var activeRun: ShotLensRunContext?
     private var isRecordingShortcut = false
     /// 弱引用 self 供 C 回调使用
     private static var shared: AppDelegate?
@@ -287,21 +292,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         if status != noErr {
-            NSLog("[ShotLens] InstallEventHandler 失败: %d", Int(status))
+            ShotLensLogger.event(
+                "hotkey_handler_install_failed",
+                level: .error,
+                stage: "hotkey",
+                outcome: "failed",
+                fields: ["error_number": String(status)]
+            )
         }
     }
 
     private func registerGlobalHotKey() {
         guard hotKeyRef == nil else { return }
         guard hotKeyHandlerRef != nil else {
-            NSLog("[ShotLens] 热键事件处理器未安装")
+            ShotLensLogger.event(
+                "hotkey_registration_blocked",
+                level: .error,
+                stage: "hotkey",
+                outcome: "failed",
+                fields: ["error_code": "hotkey.handler_missing"]
+            )
             return
         }
 
         let hotKey = HotKey.loadSavedOrDefault()
-
-        NSLog("[ShotLens] 注册快捷键 keyCode=%d modifiers=0x%X (%@)",
-              hotKey.keyCode, hotKey.modifiers, hotKey.displayString)
+        ShotLensLogger.event("hotkey_registration_started", stage: "hotkey")
 
         let status = RegisterEventHotKey(
             UInt32(hotKey.keyCode),
@@ -313,18 +328,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         if status != noErr {
-            NSLog("[ShotLens] RegisterEventHotKey 失败: %d", Int(status))
+            ShotLensLogger.event(
+                "hotkey_registration_failed",
+                level: .error,
+                stage: "hotkey",
+                outcome: "failed",
+                fields: ["error_number": String(status)]
+            )
             return
         }
 
-        NSLog("[ShotLens] RegisterEventHotKey 成功")
+        ShotLensLogger.event("hotkey_registration_completed", stage: "hotkey", outcome: "success")
     }
 
     private func unregisterGlobalHotKey() {
         if let ref = hotKeyRef {
             UnregisterEventHotKey(ref)
             hotKeyRef = nil
-            NSLog("[ShotLens] 已注销旧快捷键")
+            ShotLensLogger.event("hotkey_unregistered", stage: "hotkey", outcome: "success")
         }
     }
 
@@ -337,66 +358,111 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - 主流程
 
-    private func handleHotKey() {
-        guard !isProcessing else { return }
+    private func handleHotKey(trigger: String = "hotkey") {
+        guard !isProcessing else {
+            ShotLensLogger.event("capture_trigger_ignored", level: .warning, stage: "flow", outcome: "busy", fields: ["trigger": trigger])
+            return
+        }
         isProcessing = true
-        ShotLensLogger.log("快捷键触发")
+        translationAttemptNumber = 0
+        let run = ShotLensLogger.startRun(trigger: trigger)
+        activeRun = run
 
         // 确保最新设置已写入 UserDefaults，翻译链路才能读到
         mainWindowController.flushPendingSave()
 
-        Task {
-            await executeTranslationFlow()
-            isProcessing = false
+        activeFlowTask = Task { [weak self] in
+            guard let self else { return }
+            let shouldReselect = await ShotLensLogger.withRun(run) {
+                await self.executeTranslationFlow(run: run)
+            }
+            guard self.activeRun?.id == run.id else { return }
+            self.activeFlowTask = nil
+            self.activeRun = nil
+            self.isProcessing = false
+            ShotLensLogger.event(
+                "run_finished",
+                run: run,
+                stage: "flow",
+                outcome: shouldReselect ? "reselect" : "finished",
+                fields: ["total_duration_ms": String(run.elapsedMilliseconds())]
+            )
+            if shouldReselect {
+                self.handleHotKey(trigger: "reselect")
+            }
         }
     }
 
-    private func executeTranslationFlow() async {
+    private func executeTranslationFlow(run: ShotLensRunContext) async -> Bool {
         // 从文本框直接抓设置，不依赖 UserDefaults 时序
-        let translationSettings = await MainActor.run { mainWindowController.currentDraftSettings() }
+        let translationSettings = mainWindowController.currentDraftSettings()
 
         guard translationSettings.isLLMConfigured else {
-            ShotLensLogger.log("自定义 API 未配置，停止截图翻译")
-            await MainActor.run { openMainWindow() }
-            return
+            let failure = PipelineFailurePresentation.make(kind: .apiNotConfigured)
+            ShotLensLogger.event("configuration_missing", level: .warning, stage: "preflight", outcome: "failed", fields: ["recovery": "open_settings"])
+            openMainWindow()
+            mainWindowController.showPipelineFailure(failure)
+            return false
         }
 
         let capture = ScreenshotCapture()
         let targetMouseLocation = NSEvent.mouseLocation
 
         guard capture.hasScreenCaptureAccess() else {
-            ShotLensLogger.log("屏幕录制权限未开启，无法冻结屏幕")
+            ShotLensLogger.event("screen_permission_missing", level: .warning, stage: "preflight", outcome: "failed")
             openMainWindow()
-            return
+            mainWindowController.showPipelineMessage("无法截取屏幕", detail: "请先开启屏幕录制权限。")
+            return false
         }
 
-        await MainActor.run {
-            mainWindowController.hide()
-        }
+        mainWindowController.hide()
 
         let frozenSnapshot: FrozenScreenshot
+        let captureStartedAt = ProcessInfo.processInfo.systemUptime
+        ShotLensLogger.event("capture_started", stage: "capture")
         do {
             guard let snapshot = try await capture.captureFrozenDisplay(containing: targetMouseLocation) else {
-                ShotLensLogger.log("冻结屏幕失败，未生成截图文件")
-                return
+                presentPreOverlayFailure(.captureFailed, event: "capture_empty", error: nil)
+                return false
             }
             frozenSnapshot = snapshot
         } catch {
-            ShotLensLogger.log("冻结屏幕失败", error: error)
-            return
+            presentPreOverlayFailure(.captureFailed, event: "capture_failed", error: error)
+            return false
         }
+        ShotLensLogger.event(
+            "capture_completed",
+            stage: "capture",
+            outcome: "success",
+            fields: [
+                "duration_ms": String(Int((ProcessInfo.processInfo.systemUptime - captureStartedAt) * 1_000)),
+                "image_width": String(frozenSnapshot.image.width),
+                "image_height": String(frozenSnapshot.image.height)
+            ]
+        )
 
         let selection: CGRect?
+        let selectionStartedAt = ProcessInfo.processInfo.systemUptime
+        ShotLensLogger.event("selection_started", stage: "selection")
         let selectionOverlay = InProcessSelectionOverlay()
         activeSelectionOverlay = selectionOverlay
         selection = await selectionOverlay.select(frozenScreenshot: frozenSnapshot)
         activeSelectionOverlay = nil
 
         guard let selection else {
-            ShotLensLogger.log("用户取消截图")
-            return
+            ShotLensLogger.event("selection_cancelled", stage: "selection", outcome: "cancelled")
+            return false
         }
-        ShotLensLogger.log("选区完成 x=\(selection.minX) y=\(selection.minY) width=\(selection.width) height=\(selection.height)")
+        ShotLensLogger.event(
+            "selection_completed",
+            stage: "selection",
+            outcome: "success",
+            fields: [
+                "duration_ms": String(Int((ProcessInfo.processInfo.systemUptime - selectionStartedAt) * 1_000)),
+                "selection_width": String(Int(selection.width.rounded())),
+                "selection_height": String(Int(selection.height.rounded()))
+            ]
+        )
 
         let captureSelection = SelectionGeometry.expandedRect(
             for: selection,
@@ -407,16 +473,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ocrCapture = try capture.crop(
                 frozenSnapshot: frozenSnapshot,
                 selection: captureSelection,
-                userSelection: selection
+                userSelection: selection,
+                writesPNG: false
             )
         } catch {
-            ShotLensLogger.log("冻结截图裁剪失败", error: error)
-            return
+            presentPreOverlayFailure(.cropFailed, event: "ocr_crop_failed", error: error)
+            return false
         }
 
         guard let ocrCapture else {
-            ShotLensLogger.log("冻结截图裁剪为空")
-            return
+            presentPreOverlayFailure(.cropFailed, event: "ocr_crop_empty", error: nil)
+            return false
         }
 
         let displayCapture: CapturedScreenshot?
@@ -428,29 +495,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         } catch {
             displayCapture = nil
-            ShotLensLogger.log("原始框选截图裁剪失败", error: error)
+            ShotLensLogger.event("display_crop_failed", level: .error, stage: "crop", outcome: "failed", error: error)
         }
         guard let displayCapture else {
-            ShotLensLogger.log("原始框选截图裁剪为空")
-            return
+            presentPreOverlayFailure(.cropFailed, event: "display_crop_empty", error: nil)
+            return false
         }
-        await MainActor.run {
-            ClipboardManager().copyImageToClipboard(image: displayCapture.image)
-        }
-        ShotLensLogger.log("原始框选截图已保存到剪贴板")
+        ClipboardManager().copyImageToClipboard(image: displayCapture.image)
+        ShotLensLogger.event("selection_copied", stage: "crop", outcome: "success")
 
         let displayScale = SelectionGeometry.displayScale(
             forPixelSize: CGSize(width: displayCapture.image.width, height: displayCapture.image.height),
             captureRect: selection
         )
 
-        await showInteractiveOverlay(
+        return await showInteractiveOverlay(
             ocrCapture: ocrCapture,
             displayImage: displayCapture.image,
             selection: selection,
             displayScale: displayScale,
-            translationSettings: translationSettings
+            translationSettings: translationSettings,
+            run: run
         )
+    }
+
+    private func presentPreOverlayFailure(
+        _ kind: PipelineFailureKind,
+        event: String,
+        error: Error?
+    ) {
+        ShotLensLogger.event(event, level: .error, stage: "capture", outcome: "failed", error: error)
+        let failure = PipelineFailurePresentation.make(kind: kind)
+        openMainWindow()
+        mainWindowController.showPipelineFailure(failure)
     }
 
     private func openScreenCapturePrivacySettings() {
@@ -463,25 +540,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         captured: CapturedScreenshot,
         displayPixelSize: CGSize,
         overlay: OverlayWindow?,
-        settings: TranslationSettings
+        settings: TranslationSettings,
+        run: ShotLensRunContext,
+        attemptID: UUID,
+        onReselect: @escaping @MainActor () -> Void
     ) async {
-        let pipelineStartedAt = Date()
         overlay?.setProcessing("正在识别文字...")
 
         let ocr = OCREngine()
-        let ocrStartedAt = Date()
+        let ocrStartedAt = ProcessInfo.processInfo.systemUptime
+        ShotLensLogger.event("ocr_started", stage: "ocr", fields: ["attempt": String(translationAttemptNumber)])
         let textBlocks: [TextBlock]
-        guard let ocrFileURL = captured.fileURL else {
-            ShotLensLogger.log("OCR 失败：裁剪图没有临时文件")
-            overlay?.setMessage("识别失败")
-            return
-        }
         do {
-            defer { try? FileManager.default.removeItem(at: ocrFileURL) }
-            textBlocks = try await ocr.recognize(imageFile: ocrFileURL)
+            textBlocks = try await ocr.recognize(image: captured.image)
+            try Task.checkCancellation()
         } catch {
-            ShotLensLogger.log("OCR 失败", error: error)
-            overlay?.setMessage("识别失败")
+            finishTranslationAttempt(attemptID)
+            if error is CancellationError { return }
+            let kind = (error as? OCREngineError)?.failureKind ?? .ocrFailed
+            ShotLensLogger.event("ocr_failed", level: .error, stage: "ocr", outcome: "failed", error: error)
+            overlay?.setFailure(PipelineFailurePresentation.make(kind: kind))
             return
         }
 
@@ -489,8 +567,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             SelectionGeometry.shouldInclude($0.boundingBox, in: captured.userSelectionRectInImage)
         }
         guard !selectedTextBlocks.isEmpty else {
-            ShotLensLogger.log("未识别到文字")
-            overlay?.setMessage("未识别到文字")
+            finishTranslationAttempt(attemptID)
+            ShotLensLogger.event("ocr_empty", level: .warning, stage: "ocr", outcome: "empty")
+            overlay?.onRetry = onReselect
+            overlay?.setFailure(PipelineFailurePresentation.make(kind: .noText))
             return
         }
         let displayTextBlocks = selectedTextBlocks.compactMap {
@@ -500,13 +580,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 displayPixelSize: displayPixelSize
             )
         }
-        ShotLensLogger.log(String(format: "OCR 完成，识别 %d 个文本块，选区内 %d 个，显示坐标 %d 个，耗时 %.2fs", textBlocks.count, selectedTextBlocks.count, displayTextBlocks.count, Date().timeIntervalSince(ocrStartedAt)))
+        ShotLensLogger.event(
+            "ocr_completed",
+            stage: "ocr",
+            outcome: "success",
+            fields: [
+                "duration_ms": String(Int((ProcessInfo.processInfo.systemUptime - ocrStartedAt) * 1_000)),
+                "ocr_block_count": String(textBlocks.count),
+                "selected_block_count": String(selectedTextBlocks.count),
+                "display_block_count": String(displayTextBlocks.count)
+            ]
+        )
         let semanticBlocks = SemanticTextGrouper.merge(displayTextBlocks)
-        ShotLensLogger.log("语义分组完成，\(displayTextBlocks.count) 个 OCR 行合并为 \(semanticBlocks.count) 个文本块")
         let contentPlan = TranslationContentPlan.make(from: semanticBlocks)
         guard !contentPlan.sourceTexts.isEmpty else {
-            ShotLensLogger.log("选区内没有需要翻译的外语")
-            overlay?.setMessage("未识别到外语")
+            finishTranslationAttempt(attemptID)
+            ShotLensLogger.event("translation_content_empty", level: .warning, stage: "planning", outcome: "empty")
+            overlay?.onRetry = onReselect
+            overlay?.setFailure(PipelineFailurePresentation.make(kind: .noForeignText))
             return
         }
         let contextTexts: [String]
@@ -521,22 +612,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             contextTexts = []
         }
-        if !contextTexts.isEmpty {
-            ShotLensLogger.log("保留 \(contextTexts.count) 条框选外围 OCR 文本用于翻译消歧")
-        }
+        let scenario = TranslationScenario.classify(sourceTexts: contentPlan.sourceTexts)
+        ShotLensLogger.event(
+            "translation_plan_completed",
+            stage: "planning",
+            outcome: "success",
+            fields: [
+                "scenario": scenario.rawValue,
+                "semantic_block_count": String(semanticBlocks.count),
+                "context_count": String(contextTexts.count),
+                "total_count": String(contentPlan.sourceTexts.count),
+                "character_count": String(contentPlan.sourceTexts.reduce(0) { $0 + $1.count })
+            ]
+        )
 
         configureTranslationRetry(
             contentPlan: contentPlan,
             contextTexts: contextTexts,
             overlay: overlay,
-            settings: settings
+            settings: settings,
+            run: run,
+            existingTranslations: nil
         )
         await translateRecognized(
             contentPlan,
             contextTexts: contextTexts,
             overlay: overlay,
             settings: settings,
-            pipelineStartedAt: pipelineStartedAt
+            run: run,
+            attemptID: attemptID,
+            existingTranslations: nil
         )
     }
 
@@ -544,20 +649,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         contentPlan: TranslationContentPlan,
         contextTexts: [String],
         overlay: OverlayWindow?,
-        settings: TranslationSettings
+        settings: TranslationSettings,
+        run: ShotLensRunContext,
+        existingTranslations: [String?]?
     ) {
         let retry = { [weak self, weak overlay] in
             guard let self else { return }
-            ShotLensLogger.log("重新翻译：复用现有 OCR 和语义分组，仅重新调用翻译 API")
-            Task {
-                await self.translateRecognized(
-                    contentPlan,
-                    contextTexts: contextTexts,
-                    overlay: overlay,
-                    settings: settings,
-                    pipelineStartedAt: Date()
-                )
-            }
+            self.startRecognizedTranslationAttempt(
+                contentPlan: contentPlan,
+                contextTexts: contextTexts,
+                overlay: overlay,
+                settings: settings,
+                run: run,
+                existingTranslations: existingTranslations
+            )
         }
         overlay?.onRetry = retry
         overlay?.onRetranslate = retry
@@ -568,9 +673,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         contextTexts: [String],
         overlay: OverlayWindow?,
         settings: TranslationSettings,
-        pipelineStartedAt: Date
+        run: ShotLensRunContext,
+        attemptID: UUID,
+        existingTranslations: [String?]?
     ) async {
-
         overlay?.setProcessing("正在翻译...")
 
         // 2. 确定源语言和目标语言
@@ -579,77 +685,237 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let provider = TranslationProviderFactory.create(with: settings)
         let texts = contentPlan.sourceTexts
-        let translationStartedAt = Date()
+        var mergedTranslations = existingTranslations ?? [String?](repeating: nil, count: texts.count)
+        if mergedTranslations.count != texts.count {
+            mergedTranslations = [String?](repeating: nil, count: texts.count)
+        }
+        let pendingIndexes = texts.indices.filter { mergedTranslations[$0] == nil }
+        let pendingTexts = pendingIndexes.map { texts[$0] }
+        if pendingIndexes.isEmpty {
+            finishTranslationAttempt(attemptID)
+            if let translatedBlocks = contentPlan.applyingAvailable(mergedTranslations), !translatedBlocks.isEmpty {
+                overlay?.setTranslatedBlocks(translatedBlocks, completedCount: texts.count, totalCount: texts.count)
+            }
+            return
+        }
+        if mergedTranslations.contains(where: { $0 != nil }),
+           let existingBlocks = contentPlan.applyingAvailable(mergedTranslations),
+           !existingBlocks.isEmpty {
+            overlay?.setTranslationProgress(existingBlocks, completedCount: mergedTranslations.compactMap { $0 }.count, totalCount: texts.count)
+        }
+        let translationStartedAt = ProcessInfo.processInfo.systemUptime
+        ShotLensLogger.event(
+            "translation_started",
+            stage: "translation",
+            fields: [
+                "attempt": String(translationAttemptNumber),
+                "total_count": String(pendingTexts.count),
+                "provider": provider.name
+            ]
+        )
         let translationResult: TranslationBatchResult
         do {
             translationResult = try await provider.translateAvailable(
-                texts,
+                pendingTexts,
                 context: contextTexts,
                 from: sourceLang,
                 to: targetLang,
                 onProgress: { [weak overlay] partial in
-                    guard let partialBlocks = contentPlan.applyingAvailable(partial.translations),
+                    var progressive = mergedTranslations
+                    for (offset, index) in pendingIndexes.enumerated() where offset < partial.translations.count {
+                        if let value = partial.translations[offset] { progressive[index] = value }
+                    }
+                    guard let partialBlocks = contentPlan.applyingAvailable(progressive),
                           !partialBlocks.isEmpty else { return }
                     overlay?.setTranslationProgress(
                         partialBlocks,
-                        completedCount: partial.completedCount,
-                        totalCount: partial.translations.count
+                        completedCount: progressive.compactMap { $0 }.count,
+                        totalCount: texts.count
                     )
                 }
             )
+            try Task.checkCancellation()
         } catch {
-            ShotLensLogger.log("翻译失败", error: error)
-            overlay?.setMessage(userFacingTranslationFailureMessage(for: error))
+            finishTranslationAttempt(attemptID)
+            if error is CancellationError || (error as? URLError)?.code == .cancelled { return }
+            let kind = translationFailureKind(for: error)
+            let presentation = PipelineFailurePresentation.make(kind: kind)
+            ShotLensLogger.event("translation_failed", level: .error, stage: "translation", outcome: "failed", error: error)
+            if presentation.recovery == .openSettings {
+                overlay?.onRetry = { [weak self, weak overlay] in
+                    overlay?.requestDismiss()
+                    self?.openMainWindow()
+                    self?.mainWindowController.showPipelineFailure(presentation)
+                }
+            }
+            overlay?.setFailure(presentation, keepsCurrentTranslation: mergedTranslations.contains { $0 != nil })
             return
         }
-        guard let translatedBlocks = contentPlan.applyingAvailable(translationResult.translations),
+        for (offset, index) in pendingIndexes.enumerated() where offset < translationResult.translations.count {
+            if let value = translationResult.translations[offset] { mergedTranslations[index] = value }
+        }
+        let completedCount = mergedTranslations.compactMap { $0 }.count
+        guard let translatedBlocks = contentPlan.applyingAvailable(mergedTranslations),
               !translatedBlocks.isEmpty else {
-            ShotLensLogger.log("翻译返回数量与待翻译语义块不一致，完成 \(translationResult.completedCount)/\(texts.count)")
-            overlay?.setMessage("翻译失败：部分内容未完成")
+            finishTranslationAttempt(attemptID)
+            ShotLensLogger.event("translation_result_empty", level: .error, stage: "translation", outcome: "failed", fields: ["completed_count": String(completedCount), "total_count": String(texts.count)])
+            overlay?.setFailure(PipelineFailurePresentation.make(kind: .invalidResponse))
             return
         }
-        ShotLensLogger.log(String(
-            format: "翻译完成，使用 %@，完成 %d/%d 个语义块，耗时 %.2fs",
-            provider.name,
-            translationResult.completedCount,
-            translationResult.translations.count,
-            Date().timeIntervalSince(translationStartedAt)
-        ))
-
-        overlay?.setTranslatedBlocks(translatedBlocks, isPartial: !translationResult.isComplete)
-        ShotLensLogger.log(String(format: "翻译流程总耗时 %.2fs", Date().timeIntervalSince(pipelineStartedAt)))
+        finishTranslationAttempt(attemptID)
+        let isPartial = completedCount < texts.count
+        configureTranslationRetry(
+            contentPlan: contentPlan,
+            contextTexts: contextTexts,
+            overlay: overlay,
+            settings: settings,
+            run: run,
+            existingTranslations: isPartial ? mergedTranslations : nil
+        )
+        let renderDuration = overlay?.setTranslatedBlocks(
+            translatedBlocks,
+            completedCount: completedCount,
+            totalCount: texts.count
+        ) ?? 0
+        if isPartial {
+            overlay?.setFailure(
+                PipelineFailurePresentation.make(
+                    kind: .partialTranslation,
+                    completedCount: completedCount,
+                    totalCount: texts.count
+                ),
+                keepsCurrentTranslation: true
+            )
+        }
+        ShotLensLogger.event(
+            "translation_completed",
+            stage: "translation",
+            outcome: isPartial ? "partial" : "success",
+            fields: [
+                "provider": provider.name,
+                "completed_count": String(completedCount),
+                "total_count": String(texts.count),
+                "duration_ms": String(Int((ProcessInfo.processInfo.systemUptime - translationStartedAt) * 1_000)),
+                "total_duration_ms": String(run.elapsedMilliseconds()),
+                "render_mode": isPartial ? "partial" : "complete",
+                "overflow_count": "0",
+                "render_duration_ms": String(renderDuration)
+            ]
+        )
     }
 
-    private func userFacingTranslationFailureMessage(for error: Error) -> String {
+    private func translationFailureKind(for error: Error) -> PipelineFailureKind {
         if let urlError = error as? URLError {
             switch urlError.code {
             case .timedOut:
-                return "翻译失败：网络超时"
-            case .networkConnectionLost, .notConnectedToInternet:
-                return "翻译失败：网络中断"
+                return .networkTimedOut
+            case .networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost, .dnsLookupFailed:
+                return .networkDisconnected
             default:
-                return "翻译失败：网络异常"
+                return .networkDisconnected
             }
         }
         if let translationError = error as? TranslationError {
             switch translationError {
-            case .llmHTTPError(let statusCode, _) where statusCode >= 500:
-                return "翻译失败：服务异常"
-            case .llmHTTPError(let statusCode, _) where statusCode == 401 || statusCode == 403:
-                return "翻译失败：API 鉴权"
-            case .llmHTTPError(let statusCode, _) where statusCode == 429:
-                return "翻译失败：请求过多"
+            case .llmHTTPError(let statusCode) where statusCode >= 500:
+                return .serviceUnavailable
+            case .llmHTTPError(let statusCode) where statusCode == 401 || statusCode == 403:
+                return .authenticationFailed
+            case .llmHTTPError(let statusCode) where statusCode == 404:
+                return .endpointOrModelNotFound
+            case .llmHTTPError(let statusCode) where statusCode == 400 || statusCode == 422:
+                return .requestRejected
+            case .llmHTTPError(let statusCode) where statusCode == 408:
+                return .networkTimedOut
+            case .llmHTTPError(let statusCode) where statusCode == 429:
+                return .rateLimited
             case .invalidLLMResponse, .llmResponseCountMismatch:
-                return "翻译失败：返回无效"
+                return .invalidResponse
             case .llmNotConfigured:
-                return "翻译失败：API 未配置"
+                return .apiNotConfigured
             case .invalidLLMEndpoint:
-                return "翻译失败：地址无效"
+                return .invalidEndpoint
             default:
                 break
             }
         }
-        return "翻译失败"
+        return .unknownTranslation
+    }
+
+    private func startOCRTranslationAttempt(
+        captured: CapturedScreenshot,
+        displayPixelSize: CGSize,
+        overlay: OverlayWindow?,
+        settings: TranslationSettings,
+        run: ShotLensRunContext,
+        onReselect: @escaping @MainActor () -> Void
+    ) {
+        guard let attemptID = translationAttemptGate.begin() else {
+            ShotLensLogger.event("translation_attempt_ignored", level: .warning, stage: "flow", outcome: "duplicate")
+            return
+        }
+        translationAttemptNumber += 1
+        activeTranslationTask = Task { [weak self, weak overlay] in
+            guard let self else { return }
+            await ShotLensLogger.withRun(run) {
+                await self.translate(
+                    captured: captured,
+                    displayPixelSize: displayPixelSize,
+                    overlay: overlay,
+                    settings: settings,
+                    run: run,
+                    attemptID: attemptID,
+                    onReselect: onReselect
+                )
+            }
+            self.finishTranslationAttempt(attemptID)
+        }
+    }
+
+    private func startRecognizedTranslationAttempt(
+        contentPlan: TranslationContentPlan,
+        contextTexts: [String],
+        overlay: OverlayWindow?,
+        settings: TranslationSettings,
+        run: ShotLensRunContext,
+        existingTranslations: [String?]?
+    ) {
+        guard let attemptID = translationAttemptGate.begin() else {
+            ShotLensLogger.event("translation_attempt_ignored", level: .warning, stage: "translation", outcome: "duplicate")
+            return
+        }
+        translationAttemptNumber += 1
+        ShotLensLogger.event("translation_retry_started", stage: "translation", fields: ["attempt": String(translationAttemptNumber)])
+        activeTranslationTask = Task { [weak self, weak overlay] in
+            guard let self else { return }
+            await ShotLensLogger.withRun(run) {
+                await self.translateRecognized(
+                    contentPlan,
+                    contextTexts: contextTexts,
+                    overlay: overlay,
+                    settings: settings,
+                    run: run,
+                    attemptID: attemptID,
+                    existingTranslations: existingTranslations
+                )
+            }
+            self.finishTranslationAttempt(attemptID)
+        }
+    }
+
+    private func finishTranslationAttempt(_ id: UUID) {
+        translationAttemptGate.finish(id)
+        if !translationAttemptGate.isRunning {
+            activeTranslationTask = nil
+        }
+    }
+
+    private func cancelActiveTranslation(run: ShotLensRunContext) {
+        guard activeTranslationTask != nil || translationAttemptGate.isRunning else { return }
+        activeTranslationTask?.cancel()
+        activeTranslationTask = nil
+        translationAttemptGate.cancel()
+        ShotLensLogger.event("translation_cancelled", run: run, stage: "flow", outcome: "cancelled")
     }
 
     // MARK: - UI 桥接
@@ -660,43 +926,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         displayImage: CGImage,
         selection: CGRect,
         displayScale: CGFloat,
-        translationSettings: TranslationSettings
-    ) async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        translationSettings: TranslationSettings,
+        run: ShotLensRunContext
+    ) async -> Bool {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             let overlay = OverlayWindow()
+            var shouldReselect = false
             self.resultOverlay = overlay
             overlay.onDismiss = { [weak self] in
+                self?.cancelActiveTranslation(run: run)
                 self?.resultOverlay = nil
-                continuation.resume()
+                continuation.resume(returning: shouldReselect)
             }
-            overlay.onRetry = { [weak self, weak overlay] in
+            let reselect: @MainActor () -> Void = { [weak overlay] in
+                shouldReselect = true
+                overlay?.requestDismiss()
+            }
+            let retryOCR: () -> Void = { [weak self, weak overlay] in
                 guard let self else { return }
-                ShotLensLogger.log("用户点击重试翻译")
-                Task {
-                    await self.translate(
-                        captured: ocrCapture,
-                        displayPixelSize: CGSize(width: displayImage.width, height: displayImage.height),
-                        overlay: overlay,
-                        settings: translationSettings
-                    )
-                }
+                self.startOCRTranslationAttempt(
+                    captured: ocrCapture,
+                    displayPixelSize: CGSize(width: displayImage.width, height: displayImage.height),
+                    overlay: overlay,
+                    settings: translationSettings,
+                    run: run,
+                    onReselect: reselect
+                )
             }
-            overlay.onRetranslate = overlay.onRetry
+            overlay.onRetry = retryOCR
+            overlay.onRetranslate = retryOCR
             overlay.show(
                 croppedScreenshot: displayImage,
                 at: selection.origin,
                 displayScale: displayScale
             )
-
-            Task { [weak self, weak overlay] in
-                guard let self else { return }
-                await self.translate(
-                    captured: ocrCapture,
-                    displayPixelSize: CGSize(width: displayImage.width, height: displayImage.height),
-                    overlay: overlay,
-                    settings: translationSettings
-                )
-            }
+            ShotLensLogger.event(
+                "overlay_presented",
+                run: run,
+                stage: "overlay",
+                outcome: "success",
+                fields: ["duration_ms": String(run.elapsedMilliseconds())]
+            )
+            retryOCR()
         }
     }
 }

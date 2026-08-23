@@ -98,7 +98,7 @@ struct LLMTranslator: TranslationProvider {
             context: context
         )
         if let cached = TranslationResultCache.shared.value(for: cacheKey) {
-            ShotLensLogger.log("使用当前会话的精确翻译缓存")
+            ShotLensLogger.event("translation_cache_hit", stage: "translation", fields: ["cache_hit": "true", "total_count": String(texts.count)])
             return TranslationBatchResult(translations: cached.map(Optional.some))
         }
 
@@ -129,7 +129,11 @@ struct LLMTranslator: TranslationProvider {
         var nonRecoverableSegmentIndexes = Set<Int>()
         let primaryBatches = makeBatchWork(from: segments)
         if shouldUseConcurrentBatches(primaryBatches, segments: segments) {
-            ShotLensLogger.log("大选区使用最多 2 路受控并发翻译")
+            ShotLensLogger.event(
+                "translation_concurrency_enabled",
+                stage: "translation",
+                fields: ["concurrency": "2", "batch_count": String(primaryBatches.count)]
+            )
             try await withThrowingTaskGroup(of: TranslationBatchOutcome.self) { group in
                 var nextBatchIndex = 0
                 let initialCount = min(2, primaryBatches.count)
@@ -225,7 +229,11 @@ struct LLMTranslator: TranslationProvider {
             let retryEnd = missingCursor + retryBatch.count
             let retryIndexes = Array(missingSegmentIndexes[missingCursor..<retryEnd])
             let retryTexts = retryIndexes.map { segments[$0].text }
-            ShotLensLogger.log("翻译缺项，按恢复批次重试 \(retryTexts.count) 项")
+            ShotLensLogger.event(
+                "translation_recovery_batch_started",
+                stage: "translation",
+                fields: ["total_count": String(retryTexts.count)]
+            )
             do {
                 let retry = try await translateBatchAvailable(
                     retryTexts,
@@ -257,7 +265,13 @@ struct LLMTranslator: TranslationProvider {
                 if segmentTranslations.allSatisfy({ $0 == nil }) {
                     throw error
                 }
-                ShotLensLogger.log("翻译恢复批次失败，保留已完成结果", error: error)
+                ShotLensLogger.event(
+                    "translation_recovery_batch_failed",
+                    level: .warning,
+                    stage: "translation",
+                    outcome: "partial",
+                    error: error
+                )
             }
             missingCursor = retryEnd
         }
@@ -355,7 +369,7 @@ struct LLMTranslator: TranslationProvider {
 
     private func isRecoverableBatchFailure(_ error: Error) -> Bool {
         if let translationError = error as? TranslationError,
-           case .llmHTTPError(let statusCode, _) = translationError {
+           case .llmHTTPError(let statusCode) = translationError {
             return statusCode == 408 || statusCode == 429 || statusCode >= 500
         }
         if let urlError = error as? URLError {
@@ -526,7 +540,12 @@ struct LLMTranslator: TranslationProvider {
         do {
             parsed = try parseTranslations(from: content, expectedCount: texts.count)
         } catch {
-            ShotLensLogger.log("翻译返回格式无法在本地解析，停止追加网络请求：\(content.logSnippet)")
+            ShotLensLogger.event(
+                "translation_response_parse_failed",
+                level: .warning,
+                stage: "translation",
+                outcome: "invalid_response"
+            )
             throw TranslationError.invalidLLMResponse
         }
 
@@ -582,11 +601,60 @@ struct LLMTranslator: TranslationProvider {
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw TranslationError.llmHTTPError(statusCode: http.statusCode, body: body)
+        let requestStartedAt = ProcessInfo.processInfo.systemUptime
+        ShotLensLogger.event(
+            "translation_request_started",
+            stage: "translation_request",
+            fields: [
+                "endpoint_host": host,
+                "character_count": String(userPayload.count)
+            ]
+        )
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            ShotLensLogger.event(
+                "translation_request_failed",
+                level: .error,
+                stage: "translation_request",
+                outcome: "failed",
+                fields: [
+                    "endpoint_host": host,
+                    "duration_ms": String(Int((ProcessInfo.processInfo.systemUptime - requestStartedAt) * 1_000))
+                ],
+                error: error
+            )
+            throw error
         }
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            let error = TranslationError.llmHTTPError(statusCode: http.statusCode)
+            ShotLensLogger.event(
+                "translation_request_failed",
+                level: .error,
+                stage: "translation_request",
+                outcome: "http_error",
+                fields: [
+                    "endpoint_host": host,
+                    "duration_ms": String(Int((ProcessInfo.processInfo.systemUptime - requestStartedAt) * 1_000)),
+                    "http_status": String(http.statusCode)
+                ],
+                error: error
+            )
+            throw error
+        }
+
+        ShotLensLogger.event(
+            "translation_request_completed",
+            stage: "translation_request",
+            outcome: "success",
+            fields: [
+                "endpoint_host": host,
+                "duration_ms": String(Int((ProcessInfo.processInfo.systemUptime - requestStartedAt) * 1_000)),
+                "http_status": String((response as? HTTPURLResponse)?.statusCode ?? 200)
+            ]
+        )
 
         return try parseAssistantContent(from: data)
     }
@@ -728,11 +796,26 @@ struct LLMTranslator: TranslationProvider {
 
         let unavailableCount = result.filter { $0 == nil }.count
         guard unavailableCount < sources.count else {
-            ShotLensLogger.log("翻译结果全部缺失或可疑，停止追加网络请求")
+            ShotLensLogger.event(
+                "translation_validation_failed",
+                level: .warning,
+                stage: "translation_validation",
+                outcome: "all_unavailable",
+                fields: ["total_count": String(sources.count)]
+            )
             throw TranslationError.invalidLLMResponse
         }
         if unavailableCount > 0 {
-            ShotLensLogger.log("翻译有 \(unavailableCount) 项缺失或可疑，保留其他可用结果")
+            ShotLensLogger.event(
+                "translation_validation_partial",
+                level: .warning,
+                stage: "translation_validation",
+                outcome: "partial",
+                fields: [
+                    "completed_count": String(sources.count - unavailableCount),
+                    "total_count": String(sources.count)
+                ]
+            )
         }
         return result
     }
@@ -1287,12 +1370,6 @@ private final class TranslationResultCache: @unchecked Sendable {
 }
 
 private extension String {
-    var logSnippet: String {
-        let clean = replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return String(clean.prefix(240))
-    }
-
     var strippingCodeFence: String {
         let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("```") else { return trimmed }

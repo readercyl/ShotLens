@@ -90,7 +90,7 @@ enum TranslationError: LocalizedError {
     case llmNotConfigured
     case invalidLLMEndpoint
     case invalidLLMResponse
-    case llmHTTPError(statusCode: Int, body: String)
+    case llmHTTPError(statusCode: Int)
     case llmResponseCountMismatch(expected: Int, actual: Int)
 
     var errorDescription: String? {
@@ -103,10 +103,65 @@ enum TranslationError: LocalizedError {
             return "API 地址无效"
         case .invalidLLMResponse:
             return "API 翻译返回格式无效"
-        case .llmHTTPError(let statusCode, let body):
-            return "API 请求失败：HTTP \(statusCode) \(body)"
+        case .llmHTTPError(let statusCode):
+            return "API 请求失败：HTTP \(statusCode)"
         case .llmResponseCountMismatch(let expected, let actual):
             return "API 翻译数量不匹配：期望 \(expected)，实际 \(actual)"
         }
+    }
+}
+
+extension TranslationError: ShotLensDiagnosticError {
+    var diagnosticCode: String {
+        switch self {
+        case .missingSourceLanguage:
+            return "translation.missing_source_language"
+        case .llmNotConfigured:
+            return "translation.api_not_configured"
+        case .invalidLLMEndpoint:
+            return "translation.invalid_endpoint"
+        case .invalidLLMResponse:
+            return "translation.invalid_response"
+        case .llmHTTPError:
+            return "translation.http_error"
+        case .llmResponseCountMismatch:
+            return "translation.count_mismatch"
+        }
+    }
+
+    var diagnosticMetadata: [String: String] {
+        switch self {
+        case .llmHTTPError(let statusCode):
+            return ["http_status": String(statusCode)]
+        case .llmResponseCountMismatch(let expected, let actual):
+            return ["total_count": String(expected), "completed_count": String(actual)]
+        default:
+            return [:]
+        }
+    }
+}
+
+extension URLError: ShotLensDiagnosticError {
+    var diagnosticCode: String {
+        switch code {
+        case .timedOut:
+            return "network.timed_out"
+        case .networkConnectionLost:
+            return "network.connection_lost"
+        case .notConnectedToInternet:
+            return "network.offline"
+        case .cannotConnectToHost:
+            return "network.cannot_connect"
+        case .dnsLookupFailed:
+            return "network.dns_failed"
+        case .cancelled:
+            return "network.cancelled"
+        default:
+            return "network.url_error"
+        }
+    }
+
+    var diagnosticMetadata: [String: String] {
+        ["error_number": String(code.rawValue)]
     }
 }
