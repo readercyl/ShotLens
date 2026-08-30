@@ -27,6 +27,10 @@ rg -n -F 'icon.widthAnchor.constraint(equalToConstant: 58)' "$MAIN_WINDOW" >/dev
 rg -n -F 'label("ShotLens", font: .systemFont(ofSize: 28, weight: .semibold))' "$MAIN_WINDOW" >/dev/null
 rg -n -F 'recorder.widthAnchor.constraint(equalToConstant: 180)' "$MAIN_WINDOW" >/dev/null
 rg -n -F 'let rightControl = makeRightControlContainer(width: 180)' "$MAIN_WINDOW" >/dev/null
+if rg -n '诊断日志|makeDiagnosticsCard|diagnosticsStatusLabel|copyDiagnosticsClicked|openDiagnosticsClicked|clearDiagnosticsClicked' "$MAIN_WINDOW" >/dev/null; then
+  echo "User-facing settings must not expose diagnostic logs." >&2
+  exit 1
+fi
 if rg -n '用于冻结屏幕和框选翻译|按下后直接进入截图框选|登录 Mac 后自动启动 ShotLens' "$MAIN_WINDOW" >/dev/null; then
   echo "Primary settings cards should not keep secondary descriptions." >&2
   exit 1

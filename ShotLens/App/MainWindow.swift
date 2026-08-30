@@ -13,7 +13,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private var pipelineMessageContainer: NSStackView?
     private var pipelineMessageTitleLabel: NSTextField?
     private var pipelineMessageDetailLabel: NSTextField?
-    private var diagnosticsStatusLabel: NSTextField?
     private var launchAtLoginSwitch: BlueSwitchControl?
     private let checkUpdateButton = NSButton()
     private let installUpdateButton = NSButton()
@@ -142,7 +141,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         root.addArrangedSubview(makeShortcutCard())
         root.addArrangedSubview(makeStartupCard())
         root.addArrangedSubview(makeAPICard())
-        root.addArrangedSubview(makeDiagnosticsCard())
         root.addArrangedSubview(makeFooter())
 
         updateAPIExpandedState()
@@ -400,44 +398,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         return container
     }
 
-    private func makeDiagnosticsCard() -> NSView {
-        let card = makeCard()
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 8
-        row.widthAnchor.constraint(equalToConstant: 366).isActive = true
-
-        let textStack = NSStackView()
-        textStack.orientation = .vertical
-        textStack.alignment = .leading
-        textStack.spacing = 1
-        textStack.addArrangedSubview(label("诊断日志", font: .systemFont(ofSize: 14, weight: .medium)))
-        let status = label("不保存截图、原文或译文", font: .systemFont(ofSize: 11), color: .secondaryLabelColor)
-        diagnosticsStatusLabel = status
-        textStack.addArrangedSubview(status)
-
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let copyButton = NSButton(title: "复制诊断", target: self, action: #selector(copyDiagnosticsClicked))
-        copyButton.bezelStyle = .rounded
-        copyButton.widthAnchor.constraint(equalToConstant: 76).isActive = true
-        let openButton = NSButton(title: "打开日志", target: self, action: #selector(openDiagnosticsClicked))
-        openButton.bezelStyle = .rounded
-        openButton.widthAnchor.constraint(equalToConstant: 76).isActive = true
-        let clearButton = NSButton(title: "清空", target: self, action: #selector(clearDiagnosticsClicked))
-        clearButton.bezelStyle = .rounded
-        clearButton.widthAnchor.constraint(equalToConstant: 58).isActive = true
-
-        row.addArrangedSubview(textStack)
-        row.addArrangedSubview(spacer)
-        row.addArrangedSubview(copyButton)
-        row.addArrangedSubview(openButton)
-        row.addArrangedSubview(clearButton)
-        card.addArrangedSubview(row)
-        return card
-    }
-
     private func makeFooter() -> NSView {
         let row = NSStackView()
         row.orientation = .horizontal
@@ -660,7 +620,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     private func updateWindowHeight(animated: Bool) {
         guard let window else { return }
-        let baseHeight: CGFloat = isApiDetailsExpanded ? 586 : 464
+        let baseHeight: CGFloat = isApiDetailsExpanded ? 526 : 404
         let pipelineHeight: CGFloat = pipelineMessageContainer?.isHidden == false ? 62 : 0
         let apiDetailHeight: CGFloat = apiStatusDetailLabel?.isHidden == false ? 30 : 0
         let targetHeight = baseHeight + pipelineHeight + apiDetailHeight
@@ -1191,36 +1151,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         guard pipelineMessageContainer?.isHidden == false else { return }
         pipelineMessageContainer?.isHidden = true
         updateWindowHeight(animated: true)
-    }
-
-    @objc private func copyDiagnosticsClicked() {
-        guard let text = ShotLensLogger.latestDiagnosticText(), !text.isEmpty else {
-            diagnosticsStatusLabel?.stringValue = "暂无诊断记录"
-            return
-        }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        diagnosticsStatusLabel?.stringValue = "已复制最近诊断"
-    }
-
-    @objc private func openDiagnosticsClicked() {
-        do {
-            try ShotLensLogger.ensureDiagnosticDirectory()
-            NSWorkspace.shared.open(ShotLensLogger.diagnosticDirectoryURL)
-            diagnosticsStatusLabel?.stringValue = "已打开日志文件夹"
-        } catch {
-            diagnosticsStatusLabel?.stringValue = "无法打开日志文件夹"
-        }
-    }
-
-    @objc private func clearDiagnosticsClicked() {
-        do {
-            try ShotLensLogger.clearDiagnostics()
-            diagnosticsStatusLabel?.stringValue = "日志已清空"
-        } catch {
-            diagnosticsStatusLabel?.stringValue = "无法清空日志"
-        }
     }
 
     @objc private func settingsDidChange() {
