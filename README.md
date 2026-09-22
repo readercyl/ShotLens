@@ -78,6 +78,10 @@ bash scripts/build-local.sh
 
 脚本默认会使用固定的本地签名证书构建 `ShotLens.app` 到 `build/local`，保持屏幕录制权限连续。如需部署到其他目录，可设置 `SHOTLENS_DEPLOY_DIR`；只有明确需要 ad-hoc 签名时才传入 `SHOTLENS_CODESIGN_IDENTITY=-`。
 
+## 产品物料
+
+设计与宣传资料已经从代码仓库分离到开发区产品容器的[物料说明](../产品物料/物料说明.md)。当前的小红书商品详情页位于[商品详情页说明](../产品物料/商品详情页/商品详情页说明.md)，不参与 App 构建、测试或发布提交。
+
 打包 DMG：
 
 ```bash
