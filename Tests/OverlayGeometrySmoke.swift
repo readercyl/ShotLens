@@ -149,7 +149,7 @@ struct OverlayGeometrySmoke {
 
     private static func assertToolbarExpandsForElapsedStatus() throws {
         let short = OverlayToolbarGeometry.preferredSize(for: "已翻译")
-        let elapsed = "1234.5s"
+        let elapsed = "翻译完成  1234.5s"
         let expanded = OverlayToolbarGeometry.preferredSize(for: elapsed)
         let frames = OverlayToolbarGeometry.frames(for: elapsed)
         guard expanded.width > short.width,
