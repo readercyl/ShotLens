@@ -6,6 +6,8 @@ struct LLMTranslator: TranslationProvider {
     /// 保留输入、提示词和译文输出的余量，避免大选区触发服务商上下文或输出上限。
     private let maxBatchItemCount = 24
     private let maxBatchCharacterCount = 4_000
+    /// 常见截图通常包含 8 个以上语义块；达到门槛后拆成两批并发，避免单批次请求拖慢整张选区。
+    private let concurrentBatchMinimumSourceCount = 8
     /// 单条语义块过长时，模型往往会在输出末尾截断或漏掉编号。
     /// 在 API 请求边界拆分，回到同一原文项后再合并，避免把长段落当成一个不可控请求。
     private let maxTranslationChunkCharacters = 3_200
@@ -40,7 +42,7 @@ struct LLMTranslator: TranslationProvider {
         var segmentTranslations = [String?](repeating: nil, count: segments.count)
         var primaryFailures: [SendableFailure] = []
         var nonRecoverableSegmentIndexes = Set<Int>()
-        let primaryBatches = makeBatchWork(from: segments)
+        let primaryBatches = makePrimaryBatchWork(from: segments)
         if shouldUseConcurrentBatches(primaryBatches, segments: segments) {
             ShotLensLogger.event(
                 "translation_concurrency_enabled",
@@ -230,11 +232,35 @@ struct LLMTranslator: TranslationProvider {
         return result
     }
 
+    private func makePrimaryBatchWork(from segments: [TranslationSegment]) -> [TranslationBatchWork] {
+        let batches = makeBatchWork(from: segments)
+        guard batches.count == 1,
+              Set(segments.map(\.sourceIndex)).count >= concurrentBatchMinimumSourceCount,
+              batches[0].texts.count > 1 else {
+            return batches
+        }
+        return splitBatchForConcurrency(batches[0])
+    }
+
+    private func splitBatchForConcurrency(_ batch: TranslationBatchWork) -> [TranslationBatchWork] {
+        let midpoint = max(1, batch.texts.count / 2)
+        let firstEnd = batch.segmentRange.lowerBound + midpoint
+        let first = TranslationBatchWork(
+            segmentRange: batch.segmentRange.lowerBound..<firstEnd,
+            texts: Array(batch.texts[..<midpoint])
+        )
+        let second = TranslationBatchWork(
+            segmentRange: firstEnd..<batch.segmentRange.upperBound,
+            texts: Array(batch.texts[midpoint...])
+        )
+        return [first, second]
+    }
+
     private func shouldUseConcurrentBatches(
         _ batches: [TranslationBatchWork],
         segments: [TranslationSegment]
     ) -> Bool {
-        batches.count > 1 && Set(segments.map(\.sourceIndex)).count >= 32
+        batches.count > 1 && Set(segments.map(\.sourceIndex)).count >= concurrentBatchMinimumSourceCount
     }
 
     private func translatePrimaryBatch(

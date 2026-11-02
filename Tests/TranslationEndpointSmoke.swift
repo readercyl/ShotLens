@@ -94,9 +94,11 @@ struct TranslationEndpointSmoke {
         try await assertArrowOutputAvoidsRepairRequest()
         try await assertLargeSelectionUsesBoundedBatches()
         try await assertLargeSelectionUsesAtMostTwoConcurrentRequests()
+        try await assertEightSemanticBlocksUseTwoConcurrentRequests()
+        try await assertSevenSemanticBlocksStaySingleRequest()
         try await assertLargeSelectionReportsPartialProgress()
         try await assertRateLimitedConcurrentBatchFallsBackToSequentialRecovery()
-        try await assertMalformedLargeBatchUsesOneBoundedRecovery()
+        try await assertMalformedBatchUsesOneBoundedRecovery()
         try await assertLongSemanticBlockSplitsAndReassembles()
         try await assertIndexedJSONStringsAreAlignedWithoutRepair()
         try await assertMissingIndexedItemRecoversWithSingleItemRetry()
@@ -752,6 +754,53 @@ struct TranslationEndpointSmoke {
         }
     }
 
+    private static func assertEightSemanticBlocksUseTwoConcurrentRequests() async throws {
+        MockOpenAIProtocol.reset()
+        let input = (0..<8).map { _ in "Eight-block source item with enough words" }
+        let oneBatch = (0..<4).map { "八块译文\($0)" }
+        MockOpenAIProtocol.assistantContent = String(
+            data: try JSONSerialization.data(withJSONObject: oneBatch),
+            encoding: .utf8
+        )!
+        MockOpenAIProtocol.responseDelay = 0.05
+
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+        let result = try await translator.translate(input, from: "en", to: "zh-Hans")
+        guard result == ["八块译文0", "八块译文1", "八块译文2", "八块译文3", "八块译文0", "八块译文1", "八块译文2", "八块译文3"],
+              MockOpenAIProtocol.requestBodies.count == 2,
+              MockOpenAIProtocol.maximumConcurrentRequests == 2 else {
+            throw TestFailure(
+                "Expected eight semantic blocks to split into exactly two concurrent requests, requests=\(MockOpenAIProtocol.requestBodies.count), max=\(MockOpenAIProtocol.maximumConcurrentRequests)"
+            )
+        }
+    }
+
+    private static func assertSevenSemanticBlocksStaySingleRequest() async throws {
+        MockOpenAIProtocol.reset()
+        let input = (0..<7).map { "Seven-block source item \($0)" }
+        let expected = (0..<7).map { "七块译文\($0)" }
+        MockOpenAIProtocol.assistantContent = String(
+            data: try JSONSerialization.data(withJSONObject: expected),
+            encoding: .utf8
+        )!
+
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1",
+            apiKey: "test-key",
+            model: "test-model"
+        ))
+        let result = try await translator.translate(input, from: "en", to: "zh-Hans")
+        guard result == expected, MockOpenAIProtocol.requestBodies.count == 1 else {
+            throw TestFailure(
+                "Expected seven semantic blocks to stay in one request, requests=\(MockOpenAIProtocol.requestBodies.count)"
+            )
+        }
+    }
+
     @MainActor
     private static func assertLargeSelectionReportsPartialProgress() async throws {
         MockOpenAIProtocol.reset()
@@ -805,10 +854,10 @@ struct TranslationEndpointSmoke {
         }
     }
 
-    private static func assertMalformedLargeBatchUsesOneBoundedRecovery() async throws {
+    private static func assertMalformedBatchUsesOneBoundedRecovery() async throws {
         MockOpenAIProtocol.reset()
-        let input = (0..<24).map { "Source item \($0)" }
-        let expected = (0..<24).map { "译文\($0)" }
+        let input = (0..<7).map { "Source item \($0)" }
+        let expected = (0..<7).map { "译文\($0)" }
         MockOpenAIProtocol.assistantContentQueue = [
             "invalid output",
             String(data: try JSONSerialization.data(withJSONObject: expected), encoding: .utf8)!
