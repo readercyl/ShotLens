@@ -98,7 +98,7 @@ struct TranslationEndpointSmoke {
         try await assertSevenSemanticBlocksStaySingleRequest()
         try await assertLargeSelectionReportsPartialProgress()
         try await assertRateLimitedConcurrentBatchFallsBackToSequentialRecovery()
-        try await assertMalformedBatchUsesOneBoundedRecovery()
+        try await assertMalformedLargeBatchUsesOneBoundedRecovery()
         try await assertLongSemanticBlockSplitsAndReassembles()
         try await assertIndexedJSONStringsAreAlignedWithoutRepair()
         try await assertMissingIndexedItemRecoversWithSingleItemRetry()
@@ -854,14 +854,16 @@ struct TranslationEndpointSmoke {
         }
     }
 
-    private static func assertMalformedBatchUsesOneBoundedRecovery() async throws {
+    private static func assertMalformedLargeBatchUsesOneBoundedRecovery() async throws {
         MockOpenAIProtocol.reset()
-        let input = (0..<7).map { "Source item \($0)" }
-        let expected = (0..<7).map { "译文\($0)" }
+        let input = (0..<24).map { "Source item \($0)" }
+        let expected = (0..<24).map { "译文\($0)" }
         MockOpenAIProtocol.assistantContentQueue = [
+            "invalid output",
             "invalid output",
             String(data: try JSONSerialization.data(withJSONObject: expected), encoding: .utf8)!
         ]
+        MockOpenAIProtocol.responseDelay = 0.05
 
         let translator = LLMTranslator(settings: TranslationSettings(
             apiEndpoint: "https://shotlens-test.local/v1",
@@ -869,8 +871,12 @@ struct TranslationEndpointSmoke {
             model: "test-model"
         ))
         let result = try await translator.translate(input, from: "en", to: "zh-Hans")
-        guard result == expected, MockOpenAIProtocol.requestBodies.count == 2 else {
-            throw TestFailure("Expected a malformed large batch to recover as one bounded batch, requests=\(MockOpenAIProtocol.requestBodies.count)")
+        guard result == expected,
+              MockOpenAIProtocol.requestBodies.count == 3,
+              MockOpenAIProtocol.maximumConcurrentRequests == 2 else {
+            throw TestFailure(
+                "Expected two malformed concurrent batches and one bounded recovery request, requests=\(MockOpenAIProtocol.requestBodies.count), max=\(MockOpenAIProtocol.maximumConcurrentRequests)"
+            )
         }
     }
 
