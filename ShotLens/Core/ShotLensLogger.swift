@@ -51,7 +51,7 @@ enum ShotLensLogger {
 
     static var diagnosticDirectoryURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Logs/ShotLens", isDirectory: true)
+            .appendingPathComponent(Bundle.main.bundleIdentifier == "com.qingcheng.shotlens.mac.development" ? "Library/Logs/ShotLens-Development" : "Library/Logs/ShotLens", isDirectory: true)
     }
 
     private static var diagnosticFileURL: URL {

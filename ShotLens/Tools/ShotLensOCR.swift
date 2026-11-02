@@ -5,7 +5,9 @@ import ImageIO
 import Vision
 import Darwin
 
+#if !SHOTLENS_OCR_TESTS
 @main
+#endif
 struct ShotLensOCR {
     static func main() {
         do {
@@ -16,7 +18,8 @@ struct ShotLensOCR {
             let imageURL = URL(fileURLWithPath: CommandLine.arguments[1])
             let blocks = try recognizeText(
                 in: imageURL,
-                allowEdgeText: CommandLine.arguments.contains("--allow-edge-text")
+                allowEdgeText: CommandLine.arguments.contains("--allow-edge-text"),
+                fast: CommandLine.arguments.contains("--fast")
             )
             let data = try JSONEncoder().encode(blocks)
             FileHandle.standardOutput.write(data)
@@ -30,21 +33,146 @@ struct ShotLensOCR {
         }
     }
 
-    private static func recognizeText(in imageURL: URL, allowEdgeText: Bool) throws -> [OCRBlockDTO] {
+    private static func recognizeText(in imageURL: URL, allowEdgeText: Bool, fast: Bool) throws -> [OCRBlockDTO] {
         guard let source = CGImageSourceCreateWithURL(imageURL as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             throw OCRToolError.unreadableImage
         }
 
-        let originalBlocks = try recognizeTextBlocks(in: image, sourceImage: image, allowEdgeText: allowEdgeText)
-        guard shouldRunEnhancedPass(primary: originalBlocks, image: image) else {
-            return originalBlocks
+        let originalBlocks = try recognizeTextBlocks(in: image, sourceImage: image, allowEdgeText: allowEdgeText, fast: fast)
+        guard !fast && shouldRunEnhancedPass(primary: originalBlocks, image: image) else {
+            return correctAlignedTextBounds(deduplicateSameText(removeAlignedIconPrefixes(originalBlocks)), image: image)
         }
         guard let enhanced = enhancedRecognitionImage(from: image) else {
-            return originalBlocks
+            return correctAlignedTextBounds(deduplicateSameText(removeAlignedIconPrefixes(originalBlocks)), image: image)
         }
-        let enhancedBlocks = try recognizeTextBlocks(in: enhanced, sourceImage: image, allowEdgeText: allowEdgeText)
-        return mergeRecognitionPasses(primary: originalBlocks, supplemental: enhancedBlocks)
+        let enhancedBlocks = try recognizeTextBlocks(in: enhanced, sourceImage: image, allowEdgeText: allowEdgeText, fast: false)
+        return correctAlignedTextBounds(deduplicateSameText(removeAlignedIconPrefixes(mergeRecognitionPasses(primary: originalBlocks, supplemental: enhancedBlocks))), image: image)
+    }
+
+    static func correctAlignedTextBounds(_ blocks: [OCRBlockDTO], image: CGImage) -> [OCRBlockDTO] {
+        blocks.map { block in
+            let box = block.boundingBox.rect
+            let peers = blocks.filter {
+                let candidate = $0.boundingBox.rect
+                return candidate.minX > box.minX + box.height * 0.45
+                    && candidate.minX < box.maxX - box.height * 0.4
+                    && min(candidate.height, box.height) / max(candidate.height, box.height) >= 0.6
+            }.map { $0.boundingBox.rect.minX }.sorted()
+            guard peers.count >= 3 else { return block }
+            let anchor = peers[peers.count / 2]
+            guard let left = separatedTextStart(in: image, box: box, expected: anchor),
+                  left > box.minX, left < box.maxX - 1 else { return block }
+            let corrected = CGRect(x: left, y: box.minY, width: box.maxX - left, height: box.height)
+            let english = block.englishRuns.compactMap { run -> OCRRunDTO? in
+                let rect = run.boundingBox.rect.intersection(corrected)
+                guard !rect.isNull, rect.width >= 1 else { return nil }
+                return OCRRunDTO(text: run.text, boundingBox: OCRRectDTO(rect: rect))
+            }
+            let selectable = block.selectableRuns.compactMap { run -> OCRSelectableRunDTO? in
+                let rect = run.boundingBox.rect.intersection(corrected)
+                guard !rect.isNull, rect.width >= 1 else { return nil }
+                return OCRSelectableRunDTO(location: run.location, length: run.length, boundingBox: OCRRectDTO(rect: rect))
+            }
+            return OCRBlockDTO(text: block.text, boundingBox: OCRRectDTO(rect: corrected),
+                               detectedLanguage: block.detectedLanguage, visualStyle: block.visualStyle,
+                               englishRuns: english, selectableRuns: selectable)
+        }
+    }
+
+    private static func separatedTextStart(in image: CGImage, box: CGRect, expected: CGFloat) -> CGFloat? {
+        let region = box.integral.intersection(CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        guard !region.isNull, region.width >= 8, region.height >= 4,
+              region.width <= 4096, region.height <= 512, let crop = image.cropping(to: region) else { return nil }
+        let width = Int(region.width), height = Int(region.height)
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let rendered = pixels.withUnsafeMutableBytes { bytes -> Bool in
+            guard let context = CGContext(data: bytes.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(crop, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard rendered else { return nil }
+        func lum(_ x: Int, _ y: Int) -> CGFloat {
+            let i = (y * width + x) * 4
+            return luminance(red: pixels[i], green: pixels[i + 1], blue: pixels[i + 2])
+        }
+        var border: [CGFloat] = []
+        for x in 0..<width { border.append(lum(x, 0)); border.append(lum(x, height - 1)) }
+        guard let background = median(border) else { return nil }
+        var occupied = [Bool](repeating: false, count: width)
+        for x in 0..<width {
+            var foreground = 0
+            for y in 0..<height where abs(lum(x, y) - background) >= 0.16 { foreground += 1 }
+            occupied[x] = foreground >= max(1, height / 25)
+        }
+        if let first = occupied.firstIndex(of: true), first >= 2,
+           abs(region.minX + CGFloat(first) - expected) <= box.height * 0.55 {
+            return max(box.minX, region.minX + CGFloat(first) - 1)
+        }
+        let minimumGap = max(3, Int(CGFloat(height) * 0.18))
+        var x = 1
+        while x < width - 1 {
+            guard !occupied[x] else { x += 1; continue }
+            let start = x
+            while x < width && !occupied[x] { x += 1 }
+            guard x < width, x - start >= minimumGap,
+                  occupied[..<start].contains(true),
+                  abs(region.minX + CGFloat(x) - expected) <= box.height * 0.55 else { continue }
+            return max(box.minX, region.minX + CGFloat(x) - 1)
+        }
+        return nil
+    }
+
+    static func deduplicateSameText(_ blocks: [OCRBlockDTO]) -> [OCRBlockDTO] {
+        var result: [OCRBlockDTO] = []
+        for block in blocks {
+            if let index = result.firstIndex(where: {
+                $0.text == block.text && $0.boundingBox.rect.overlapRatio(with: block.boundingBox.rect) >= 0.55
+            }) {
+                if block.visualStyle.confidence > result[index].visualStyle.confidence {
+                    result[index] = block
+                }
+            } else {
+                result.append(block)
+            }
+        }
+        return result
+    }
+
+    /// Only remove a one-character icon-like prefix when surrounding rows independently
+    /// establish a shared text column. Without that evidence preserve the observation.
+    static func removeAlignedIconPrefixes(_ blocks: [OCRBlockDTO]) -> [OCRBlockDTO] {
+        let pattern = #"^(?:(?:[•‹›≥&.,<>°/]+|LI|Ii|L|D)+)\s+"#
+        let clean = blocks.filter { $0.text.range(of: pattern, options: .regularExpression) == nil }
+        return blocks.map { block in
+            guard let prefix = block.text.range(of: pattern, options: .regularExpression) else { return block }
+            let stripped = String(block.text[prefix.upperBound...])
+            guard let firstRun = block.englishRuns.first(where: { stripped.hasPrefix($0.text) }) else { return block }
+            let box = block.boundingBox.rect
+            let runX = firstRun.boundingBox.rect.minX
+            let peers = clean.filter {
+                let p = $0.boundingBox.rect
+                return p.minX > box.minX + box.height * 0.6
+                    && abs(p.minX - runX) <= box.height * 0.98
+            }.map { $0.boundingBox.rect.minX }.sorted()
+            guard peers.count >= 3 else { return block }
+            let left = peers[peers.count / 2]
+            guard left < box.maxX - box.height else { return block }
+            guard !stripped.isEmpty else { return block }
+            let prefixLength = NSRange(block.text.startIndex..<prefix.upperBound, in: block.text).length
+            let selectedRuns = block.selectableRuns.compactMap { run -> OCRSelectableRunDTO? in
+                guard run.location >= prefixLength else { return nil }
+                return OCRSelectableRunDTO(location: run.location - prefixLength, length: run.length, boundingBox: run.boundingBox)
+            }
+            return OCRBlockDTO(text: stripped,
+                               boundingBox: OCRRectDTO(rect: CGRect(x: left, y: box.minY, width: box.maxX - left, height: box.height)),
+                               detectedLanguage: block.detectedLanguage,
+                               visualStyle: block.visualStyle,
+                               englishRuns: block.englishRuns,
+                               selectableRuns: selectedRuns)
+        }
     }
 
     /// 单词和单行高置信截图直接采用原图；分散小文本仍保留增强补漏，
@@ -96,14 +224,15 @@ struct ShotLensOCR {
     private static func recognizeTextBlocks(
         in recognitionImage: CGImage,
         sourceImage: CGImage,
-        allowEdgeText: Bool
+        allowEdgeText: Bool,
+        fast: Bool
     ) throws -> [OCRBlockDTO] {
         let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = true
+        request.recognitionLevel = fast ? .fast : .accurate
+        request.usesLanguageCorrection = !fast
         request.automaticallyDetectsLanguage = true
         request.minimumTextHeight = 0.004
-        request.recognitionLanguages = supportedRecognitionLanguages()
+        request.recognitionLanguages = supportedRecognitionLanguages(for: request)
         request.customWords = [
             "AI",
             "API",
@@ -144,9 +273,7 @@ struct ShotLensOCR {
         }
     }
 
-    private static func supportedRecognitionLanguages() -> [String] {
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
+    private static func supportedRecognitionLanguages(for request: VNRecognizeTextRequest) -> [String] {
         let supported = (try? request.supportedRecognitionLanguages()) ?? ["en-US", "zh-Hans"]
         let preferred = [
             "en-US", "zh-Hans", "zh-Hant", "ja-JP", "ko-KR",
@@ -175,8 +302,8 @@ struct ShotLensOCR {
         imageSize: CGSize,
         allowEdgeText: Bool
     ) -> OCRBlockDTO? {
-        let text = candidate.string
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawText = candidate.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = rawText
             .replacingOccurrences(
                 of: #"\bGPT-4[0O]\b"#,
                 with: "GPT-4o",
@@ -195,6 +322,37 @@ struct ShotLensOCR {
         }
 
         let ranges = englishRanges(in: text)
+        let rawRange = (candidate.string as NSString).range(of: rawText)
+        var selectableRuns: [OCRSelectableRunDTO] = []
+        if rawRange.location != NSNotFound {
+            // Treat each non-whitespace token as a unit, so identifiers such as
+            // URLs and hyphenated words cannot be accidentally selected in pieces.
+            let regex = try? NSRegularExpression(pattern: #"\S+"#)
+            for match in regex?.matches(in: rawText, range: NSRange(location: 0, length: (rawText as NSString).length)) ?? [] {
+                guard let tokenRange = Range(match.range, in: rawText) else { continue }
+                let token = String(rawText[tokenRange])
+                let hasEastAsianScript = token.unicodeScalars.contains {
+                    (0x3040...0x30FF).contains($0.value) || (0x3400...0x9FFF).contains($0.value)
+                }
+                var tokenRanges: [NSRange] = []
+                if hasEastAsianScript {
+                    token.enumerateSubstrings(in: token.startIndex..<token.endIndex, options: [.byWords, .substringNotRequired]) { _, range, _, _ in
+                        let local = NSRange(range, in: token)
+                        tokenRanges.append(NSRange(location: match.range.location + local.location, length: local.length))
+                    }
+                }
+                if tokenRanges.isEmpty { tokenRanges = [match.range] }
+                for tokenRange in tokenRanges {
+                    let candidateRange = NSRange(location: rawRange.location + tokenRange.location, length: tokenRange.length)
+                    guard let range = Range(candidateRange, in: candidate.string),
+                          let observation = try? candidate.boundingBox(for: range) else { continue }
+                    let rect = observation.boundingBox.fromVisionNormalized(to: imageSize)
+                    guard rect.width >= 1, rect.height >= 1 else { continue }
+                    selectableRuns.append(OCRSelectableRunDTO(location: tokenRange.location, length: tokenRange.length,
+                                                             boundingBox: OCRRectDTO(rect: rect)))
+                }
+            }
+        }
         let englishRuns = ranges.compactMap { range -> OCRRunDTO? in
             let rawRun = String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
             let run = rawRun
@@ -231,7 +389,8 @@ struct ShotLensOCR {
                 boundingBox: lineBoundingBox,
                 confidence: candidate.confidence
             ),
-            englishRuns: englishRuns
+            englishRuns: englishRuns,
+            selectableRuns: selectableRuns
         )
     }
 
@@ -419,20 +578,27 @@ struct ShotLensOCR {
 
 }
 
-private struct OCRBlockDTO: Encodable {
+struct OCRBlockDTO: Encodable {
     let text: String
     let boundingBox: OCRRectDTO
     let detectedLanguage: String
     let visualStyle: OCRStyleDTO
     let englishRuns: [OCRRunDTO]
+    let selectableRuns: [OCRSelectableRunDTO]
 }
 
-private struct OCRRunDTO: Encodable {
+struct OCRSelectableRunDTO: Encodable {
+    let location: Int
+    let length: Int
+    let boundingBox: OCRRectDTO
+}
+
+struct OCRRunDTO: Encodable {
     let text: String
     let boundingBox: OCRRectDTO
 }
 
-private struct OCRStyleDTO: Encodable {
+struct OCRStyleDTO: Encodable {
     let confidence: Float
     let estimatedFontSize: CGFloat
     let foregroundRed: CGFloat
@@ -460,7 +626,7 @@ private struct OCRStyleDTO: Encodable {
     }
 }
 
-private struct OCRRectDTO: Encodable {
+struct OCRRectDTO: Encodable {
     let x: CGFloat
     let y: CGFloat
     let width: CGFloat

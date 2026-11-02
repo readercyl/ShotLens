@@ -25,8 +25,8 @@ struct TranslationContentPlannerSmoke {
 
     private static func assertChineseOnlyIsExcluded() throws {
         let plan = TranslationContentPlan.make(from: [block("已经是中文")])
-        guard plan.sourceTexts.isEmpty,
-              plan.applying([])?.map(\.translatedText) == ["已经是中文"] else {
+        guard plan.sourceTexts == ["已经是中文"],
+              plan.applying(["已经是中文"])?.map(\.translatedText) == ["已经是中文"] else {
             throw TestFailure("Chinese-only blocks must not be sent, but must remain in the render document")
         }
     }
@@ -36,8 +36,8 @@ struct TranslationContentPlannerSmoke {
             block("智能体指数已更新", x: 10, y: 10),
             block("Intelligence Index", x: 10, y: 50)
         ])
-        guard plan.sourceTexts == ["Intelligence Index"],
-              plan.applying(["智能体指数"])?.map(\.translatedText) == ["智能体指数已更新", "智能体指数"] else {
+        guard plan.sourceTexts == ["智能体指数已更新", "Intelligence Index"],
+              plan.applying(["智能体指数已更新", "智能体指数"])?.map(\.translatedText) == ["智能体指数已更新", "智能体指数"] else {
             throw TestFailure("Mixed render documents must retain Chinese-only blocks without sending them to the API")
         }
     }

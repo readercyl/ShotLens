@@ -49,6 +49,14 @@ struct OCRSelectionFilterSmoke {
         guard englishRuns.contains("English"), englishRuns.contains("More") else {
             throw TestFailure("Mixed-language lines must keep English ranges: \(texts) / \(englishRuns)")
         }
+        guard blocks.contains(where: { block in
+            block.selectableRuns.contains(where: { run in
+                NSMaxRange(run.range) <= (block.text as NSString).length
+                    && (block.text as NSString).substring(with: run.range) == "English"
+            })
+        }) else {
+            throw TestFailure("Recognized words must expose selectable ranges: \(texts)")
+        }
         guard !englishRuns.contains(where: { $0.contains("中文") || $0 == "X" || $0 == "#" }) else {
             throw TestFailure("Chinese or OCR noise must not be emitted as translatable English: \(englishRuns)")
         }
@@ -59,7 +67,36 @@ struct OCRSelectionFilterSmoke {
             throw TestFailure("Pure icon and symbol noise must be excluded: \(texts)")
         }
 
+        try assertAlignedLiteralLetterSurvives(helperPath: CommandLine.arguments[1])
+
         print("OCR selection filter smoke test passed.")
+    }
+
+    private static func assertAlignedLiteralLetterSurvives(helperPath: String) throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("shotlens-ocr-literal-letter.png")
+        let image = NSImage(size: NSSize(width: 600, height: 500))
+        image.lockFocus()
+        NSColor.white.setFill()
+        NSRect(x: 0, y: 0, width: 600, height: 500).fill()
+        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 28), .foregroundColor: NSColor.black]
+        for (index, text) in ["Alpha", "Beta", "L Size", "Gamma", "Delta", "Omega"].enumerated() {
+            (text as NSString).draw(at: NSPoint(x: index == 2 ? 40 : 82, y: 420 - index * 65), withAttributes: attributes)
+        }
+        image.unlockFocus()
+        try image.writePNG(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: helperPath)
+        process.arguments = [url.path]
+        let output = Pipe()
+        process.standardOutput = output
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw TestFailure("Aligned text OCR failed") }
+        let blocks = try JSONDecoder().decode([OCRBlock].self, from: output.fileHandleForReading.readDataToEndOfFile())
+        guard blocks.contains(where: { $0.text == "L Size" }) else {
+            throw TestFailure("A genuine L must not be removed as an icon: \(blocks.map(\.text))")
+        }
     }
 
     private static func makeTestImage() -> NSImage {
@@ -109,6 +146,13 @@ struct OCRSelectionFilterSmoke {
 private struct OCRBlock: Decodable {
     let text: String
     let englishRuns: [OCRRun]
+    let selectableRuns: [OCRSelectableRun]
+}
+
+private struct OCRSelectableRun: Decodable {
+    let location: Int
+    let length: Int
+    var range: NSRange { NSRange(location: location, length: length) }
 }
 
 private struct OCRRun: Decodable {

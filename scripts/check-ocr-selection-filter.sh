@@ -23,12 +23,18 @@ swiftc \
 
 "$TEST_BINARY" "$OCR_HELPER"
 
+swiftc -D SHOTLENS_OCR_TESTS -parse-as-library \
+  "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" \
+  "$ROOT_DIR/Tests/OCRPostProcessingSmoke.swift" \
+  -o "$BUILD_DIR/ocr-post-processing-smoke"
+"$BUILD_DIR/ocr-post-processing-smoke"
+
 rg -n 'let originalBlocks = try recognizeTextBlocks' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
 rg -n 'mergeRecognitionPasses\(primary: originalBlocks, supplemental: enhancedBlocks\)' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
 rg -n 'shouldRunEnhancedPass\(primary: originalBlocks, image: image\)' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
-rg -n 'request\.usesLanguageCorrection = true' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
+rg -n 'request\.usesLanguageCorrection = !fast' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
 rg -n 'request\.automaticallyDetectsLanguage = true' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
-rg -n 'supportedRecognitionLanguages\(\)' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
+rg -n 'supportedRecognitionLanguages\(for: request\)' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
 rg -n 'request\.supportedRecognitionLanguages\(\)' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
 rg -n 'allow-edge-text' "$ROOT_DIR/ShotLens/Core/OCREngine.swift" "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null
 rg -n 'boundingBox\(for:' "$ROOT_DIR/ShotLens/Tools/ShotLensOCR.swift" >/dev/null

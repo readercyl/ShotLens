@@ -24,7 +24,7 @@ rg -n -F 'contentRect: NSRect(x: 0, y: 0, width: 430, height: 442)' "$MAIN_WINDO
 rg -n -F 'row.widthAnchor.constraint(equalToConstant: 398)' "$MAIN_WINDOW" >/dev/null
 rg -n -F 'card.widthAnchor.constraint(equalToConstant: 398)' "$MAIN_WINDOW" >/dev/null
 rg -n -F 'icon.widthAnchor.constraint(equalToConstant: 58)' "$MAIN_WINDOW" >/dev/null
-rg -n -F 'label("ShotLens", font: .systemFont(ofSize: 28, weight: .semibold))' "$MAIN_WINDOW" >/dev/null
+rg -n -F 'label(applicationDisplayName, font: .systemFont(ofSize: 28, weight: .semibold))' "$MAIN_WINDOW" >/dev/null
 rg -n -F 'recorder.widthAnchor.constraint(equalToConstant: 180)' "$MAIN_WINDOW" >/dev/null
 rg -n -F 'let rightControl = makeRightControlContainer(width: 180)' "$MAIN_WINDOW" >/dev/null
 if rg -n '诊断日志|makeDiagnosticsCard|diagnosticsStatusLabel|copyDiagnosticsClicked|openDiagnosticsClicked|clearDiagnosticsClicked' "$MAIN_WINDOW" >/dev/null; then
@@ -93,7 +93,7 @@ if grep -E 'captureFrozenDisplay|executeTranslationFlow|startCapture' <<<"$RETRY
   exit 1
 fi
 rg -n 'translateRecognized' "$SHOTLENS_APP" >/dev/null
-rg -n 'ocr\.recognize\(image: captured\.image\)' "$SHOTLENS_APP" >/dev/null
+rg -n 'ocr\.recognizeResult\(image: captured\.image\)' "$SHOTLENS_APP" >/dev/null
 rg -n 'translationAttemptGate' "$SHOTLENS_APP" >/dev/null
 rg -n 'setFailure\(PipelineFailurePresentation' "$SHOTLENS_APP" >/dev/null
 if rg -n 'message\.contains\("失败"\)|classifyFailure' "$OVERLAY_WINDOW" >/dev/null; then

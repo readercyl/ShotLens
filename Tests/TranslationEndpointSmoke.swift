@@ -80,15 +80,14 @@ struct TranslationEndpointSmoke {
         try await assertSingleBlockProtocolNoiseIsFiltered()
         try await assertSingleBlockControlTokensAreFiltered()
         try await assertSingleBlockHTTPHeadersAreFiltered()
-        try await assertUnchangedSingleEnglishWordUsesLocalFallback()
+        try await assertUIWordsUseRemoteTranslation()
         try await assertShortEnglishWordEchoIsRetried()
+        try await assertWordPromptUsesConsistentIndexedFormat()
         try await assertNonLatinEchoIsRetried()
-        try await assertCommonShortUIWordUsesLocalFallback()
         try await assertPunctuatedUIWordUsesRemoteTranslation()
         try await assertAmbiguousWordUsesRemoteContext()
         try await assertTextShapePrompts()
-        try await assertMixedLocalAndRemoteTranslationsAreReassembled()
-        try await assertExactBatchUsesSessionCache()
+        try await assertRepeatedBatchUsesModel()
         try await assertMalformedOutputFailsAfterBoundedRetry()
         try await assertLabeledSingleTranslationExtractsChinese()
         try await assertAbbreviationUsesSurroundingContext()
@@ -123,6 +122,19 @@ struct TranslationEndpointSmoke {
         try await assertConnectionCheckMarksRateLimitTransient()
 
         print("Translation endpoint smoke test passed.")
+    }
+
+    private static func assertWordPromptUsesConsistentIndexedFormat() async throws {
+        MockOpenAIProtocol.reset()
+        MockOpenAIProtocol.assistantContent = "0\t摘要"
+        let translator = LLMTranslator(settings: TranslationSettings(
+            apiEndpoint: "https://shotlens-test.local/v1", apiKey: "test-key", model: "test-model"
+        ))
+        _ = try await translator.translate(["abstract"], from: "en", to: "zh-Hans")
+        guard let body = MockOpenAIProtocol.requestBodies.first,
+              body.contains("id, one tab"), !body.contains("no explanation, numbering") else {
+            throw TestFailure("Word prompt must not contradict the numbered response format")
+        }
     }
 
     private static func assertTranslates(
@@ -446,22 +458,16 @@ struct TranslationEndpointSmoke {
         }
     }
 
-    private static func assertUnchangedSingleEnglishWordUsesLocalFallback() async throws {
+    private static func assertUIWordsUseRemoteTranslation() async throws {
         MockOpenAIProtocol.reset()
-        MockOpenAIProtocol.assistantContent = "Settings"
-
+        MockOpenAIProtocol.assistantContent = "0\t设置\n1\t取消"
         let translator = LLMTranslator(settings: TranslationSettings(
-            apiEndpoint: "https://shotlens-test.local/v1",
-            apiKey: "test-key",
-            model: "test-model"
+            apiEndpoint: "https://shotlens-test.local/v1", apiKey: "test-key", model: "test-model"
         ))
-
-        let result = try await translator.translate(["Settings"], from: "en", to: "zh-Hans")
-        guard result == ["设置"] else {
-            throw TestFailure("Expected unchanged single English word to use local fallback, got \(result)")
-        }
-        guard MockOpenAIProtocol.requestBodies.isEmpty else {
-            throw TestFailure("Expected deterministic UI translation to skip the network")
+        let result = try await translator.translate(["Settings", "Cancel"], from: "en", to: "zh-Hans")
+        guard result == ["设置", "取消"], let body = MockOpenAIProtocol.requestBodies.first,
+              body.contains("Settings"), body.contains("Cancel") else {
+            throw TestFailure("All UI words must be sent to the model")
         }
     }
 
@@ -498,25 +504,6 @@ struct TranslationEndpointSmoke {
         let result = try await translator.translate(["Открыть настройки"], from: "auto", to: "zh-Hans")
         guard result == ["打开设置"], MockOpenAIProtocol.requestBodies.count == 2 else {
             throw TestFailure("Expected an echoed non-Latin phrase to receive one bounded retry, got \(result)")
-        }
-    }
-
-    private static func assertCommonShortUIWordUsesLocalFallback() async throws {
-        MockOpenAIProtocol.reset()
-        MockOpenAIProtocol.assistantContent = "Pricing"
-
-        let translator = LLMTranslator(settings: TranslationSettings(
-            apiEndpoint: "https://shotlens-test.local/v1",
-            apiKey: "test-key",
-            model: "test-model"
-        ))
-
-        let result = try await translator.translate(["Pricing", "Updated", "Cancel"], from: "en", to: "zh-Hans")
-        guard result == ["价格", "已更新", "取消"] else {
-            throw TestFailure("Expected common UI words to use local fallbacks, got \(result)")
-        }
-        guard MockOpenAIProtocol.requestBodies.isEmpty else {
-            throw TestFailure("Expected deterministic UI translation to skip the network")
         }
     }
 
@@ -610,33 +597,7 @@ struct TranslationEndpointSmoke {
         }
     }
 
-    private static func assertMixedLocalAndRemoteTranslationsAreReassembled() async throws {
-        MockOpenAIProtocol.reset()
-        MockOpenAIProtocol.assistantContent = #"{"translations":["解释缓存策略"]}"#
-        let translator = LLMTranslator(settings: TranslationSettings(
-            apiEndpoint: "https://shotlens-test.local/v1",
-            apiKey: "test-key",
-            model: "test-model"
-        ))
-
-        let result = try await translator.translate(
-            ["Settings", "Explain the cache policy", "Cancel"],
-            from: "en",
-            to: "zh-Hans"
-        )
-        guard result == ["设置", "解释缓存策略", "取消"] else {
-            throw TestFailure("Expected local and remote translations to be reassembled in place, got \(result)")
-        }
-        guard MockOpenAIProtocol.requestBodies.count == 1,
-              let body = MockOpenAIProtocol.requestBodies.first,
-              body.contains("Explain the cache policy"),
-              !body.contains("Settings"),
-              !body.contains("Cancel") else {
-            throw TestFailure("Expected only unknown text to reach the translation API")
-        }
-    }
-
-    private static func assertExactBatchUsesSessionCache() async throws {
+    private static func assertRepeatedBatchUsesModel() async throws {
         MockOpenAIProtocol.reset()
         MockOpenAIProtocol.assistantContent = #"{"translations":["唯一缓存探针句子 7319"]}"#
         let translator = LLMTranslator(settings: TranslationSettings(
@@ -651,8 +612,8 @@ struct TranslationEndpointSmoke {
         guard first == ["唯一缓存探针句子 7319"], second == first else {
             throw TestFailure("Expected an exact cached translation result")
         }
-        guard MockOpenAIProtocol.requestBodies.count == 1 else {
-            throw TestFailure("Expected the identical second batch to skip the network")
+        guard MockOpenAIProtocol.requestBodies.count == 2 else {
+            throw TestFailure("Expected each batch to reach the model")
         }
     }
 
@@ -1270,7 +1231,6 @@ private final class MockOpenAIProtocol: URLProtocol {
     }
 
     static func reset() {
-        LLMTranslator.resetSessionCacheForTesting()
         lock.lock()
         hosts = []
         paths = []

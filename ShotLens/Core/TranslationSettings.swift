@@ -8,7 +8,7 @@ protocol TranslationSecretStore: AnyObject {
 }
 
 private final class KeychainTranslationSecretStore: TranslationSecretStore {
-    private let service = "com.qingcheng.shotlens.mac"
+    private let service = Bundle.main.bundleIdentifier == "com.qingcheng.shotlens.mac.development" ? "com.qingcheng.shotlens.mac.development" : "com.qingcheng.shotlens.mac"
     private let account = "translation-api-key"
 
     func load() throws -> String? {

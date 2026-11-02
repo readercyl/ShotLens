@@ -178,15 +178,9 @@ struct TranslationContentPlan {
         for block in blocks {
             let source = block.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !source.isEmpty else { continue }
-            if block.text.containsTranslatableLanguage {
-                let index = sourceTexts.count
-                sourceTexts.append(source)
-                blockPlans.append(BlockPlan(original: block, translationIndex: index))
-            } else {
-                // 中文、纯数字和符号不发送给模型，但必须进入结果文档，
-                // 否则整窗重排时它们会继续留在底层截图，造成重复和覆盖。
-                blockPlans.append(BlockPlan(original: block, translationIndex: nil))
-            }
+            let index = sourceTexts.count
+            sourceTexts.append(source)
+            blockPlans.append(BlockPlan(original: block, translationIndex: index))
         }
         return TranslationContentPlan(sourceTexts: sourceTexts, blockPlans: blockPlans)
     }

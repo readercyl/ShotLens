@@ -2,23 +2,73 @@ import Foundation
 import CoreGraphics
 import ImageIO
 
+struct OCRRecognition {
+    let blocks: [TextBlock]
+    let usedFast: Bool
+}
+
+private struct OCRAttemptOutcome: @unchecked Sendable {
+    let result: OCRRecognition?
+    let error: Error?
+    let usedFast: Bool
+}
+
 /// OCR 客户端。真正的 Vision OCR 在 ShotLensOCR helper 进程内执行，
 /// 避免 Vision/ANE 崩溃时把主 app 一起带退出。
 struct OCREngine {
     func recognize(image: CGImage) async throws -> [TextBlock] {
+        try await recognizeResult(image: image).blocks
+    }
+
+    func recognizeResult(image: CGImage, fastFallbackDelay: TimeInterval = 10) async throws -> OCRRecognition {
         try Task.checkCancellation()
         let imageURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("ShotLens-OCR-\(UUID().uuidString)")
             .appendingPathExtension("png")
         try writePNG(image, to: imageURL)
         defer { try? FileManager.default.removeItem(at: imageURL) }
-        return try await recognize(imageFile: imageURL)
+        return try await recognizeResult(imageFile: imageURL, fastFallbackDelay: fastFallbackDelay)
     }
 
     func recognize(imageFile url: URL) async throws -> [TextBlock] {
+        try await recognizeResult(imageFile: url, fastFallbackDelay: 10).blocks
+    }
+
+    private func recognizeResult(imageFile url: URL, fastFallbackDelay: TimeInterval) async throws -> OCRRecognition {
         try Task.checkCancellation()
         let helperURL = try locateHelper()
-        return try await runHelper(helperURL: helperURL, imageURL: url)
+        let outcome = await withTaskGroup(of: OCRAttemptOutcome.self, returning: OCRAttemptOutcome.self) { group in
+            group.addTask {
+                do {
+                    let blocks = try await runHelper(helperURL: helperURL, imageURL: url, fast: false)
+                    return OCRAttemptOutcome(result: OCRRecognition(blocks: blocks, usedFast: false), error: nil, usedFast: false)
+                } catch {
+                    return OCRAttemptOutcome(result: nil, error: error, usedFast: false)
+                }
+            }
+            group.addTask {
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(max(0, fastFallbackDelay) * 1_000_000_000))
+                    let blocks = try await runHelper(helperURL: helperURL, imageURL: url, fast: true)
+                    return OCRAttemptOutcome(result: OCRRecognition(blocks: blocks, usedFast: true), error: nil, usedFast: true)
+                } catch {
+                    return OCRAttemptOutcome(result: nil, error: error, usedFast: true)
+                }
+            }
+            var accurateError: Error?
+            var fallbackError: Error?
+            for await attempt in group {
+                if let result = attempt.result, !attempt.usedFast || !result.blocks.isEmpty {
+                    group.cancelAll()
+                    return attempt
+                }
+                if attempt.usedFast { fallbackError = attempt.error } else { accurateError = attempt.error }
+            }
+            return OCRAttemptOutcome(result: nil, error: accurateError ?? fallbackError ?? OCREngineError.invalidHelperOutput, usedFast: false)
+        }
+        try Task.checkCancellation()
+        if let result = outcome.result { return result }
+        throw outcome.error ?? OCREngineError.invalidHelperOutput
     }
 
     private func writePNG(_ image: CGImage, to url: URL) throws {
@@ -52,7 +102,7 @@ struct OCREngine {
         return helperURL
     }
 
-    private func runHelper(helperURL: URL, imageURL: URL) async throws -> [TextBlock] {
+    private func runHelper(helperURL: URL, imageURL: URL, fast: Bool) async throws -> [TextBlock] {
         let controller = OCRProcessController()
         return try await withTaskCancellationHandler(operation: {
             try await withCheckedThrowingContinuation { continuation in
@@ -60,7 +110,7 @@ struct OCREngine {
             process.executableURL = helperURL
             // 选区截图已由主进程扩展了 OCR 上下文；边缘文字是否属于用户选区
             // 会在主进程按原始框选区域再次过滤。
-            process.arguments = [imageURL.path, "--allow-edge-text"]
+            process.arguments = [imageURL.path, "--allow-edge-text"] + (fast ? ["--fast"] : [])
 
             let outputCollector = OCRProcessOutputCollector()
             process.standardOutput = outputCollector.stdout
@@ -250,6 +300,7 @@ private struct OCRBlockDTO: Decodable {
     let detectedLanguage: String
     let visualStyle: TextBlockVisualStyle?
     let englishRuns: [OCRRunDTO]?
+    let selectableRuns: [OCRSelectableRunDTO]?
 
     var textBlock: TextBlock {
         TextBlock(
@@ -257,8 +308,19 @@ private struct OCRBlockDTO: Decodable {
             boundingBox: boundingBox.cgRect,
             detectedLanguage: detectedLanguage,
             visualStyle: visualStyle ?? .unknown,
-            englishRuns: (englishRuns ?? []).map(\.textRun)
+            englishRuns: (englishRuns ?? []).map(\.textRun),
+            selectableRuns: (selectableRuns ?? []).map(\.selectableRun)
         )
+    }
+}
+
+private struct OCRSelectableRunDTO: Decodable {
+    let location: Int
+    let length: Int
+    let boundingBox: OCRRectDTO
+
+    var selectableRun: SelectableTextRun {
+        SelectableTextRun(range: NSRange(location: location, length: length), boundingBox: boundingBox.cgRect)
     }
 }
 

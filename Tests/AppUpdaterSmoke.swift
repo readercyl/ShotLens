@@ -13,9 +13,27 @@ struct AppUpdaterSmoke {
         try await assertInvalidTagIsUnavailable(session: session)
         try assertAutomaticCheckSchedule()
         try assertAutomaticInstallScope()
+        try assertDevelopmentCopyCannotStartInstaller()
         try assertInstallerUsesStagingAndRollback()
 
         print("App updater smoke test passed.")
+    }
+
+    @MainActor
+    private static func assertDevelopmentCopyCannotStartInstaller() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("shotlens-update-test-\(UUID().uuidString).app")
+        let contents = directory.appendingPathComponent("Contents")
+        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let plist: [String: Any] = ["CFBundleIdentifier": "com.qingcheng.shotlens.mac.development"]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: contents.appendingPathComponent("Info.plist"))
+        do {
+            try AppUpdater().installDownloadedUpdate(from: URL(fileURLWithPath: "/tmp/unused.dmg"), replacing: directory)
+            throw TestFailure("Development copies must not start the release installer")
+        } catch AppUpdaterError.developmentBuild {
+            return
+        }
     }
 
     private static func assertInstallerUsesStagingAndRollback() throws {

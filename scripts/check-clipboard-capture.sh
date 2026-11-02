@@ -21,7 +21,7 @@ rg -n -F 'appendingPathComponent("ShotLens-OCR-\(UUID().uuidString)")' \
   "$ROOT_DIR/ShotLens/Core/OCREngine.swift" >/dev/null
 rg -n -F 'defer { try? FileManager.default.removeItem(at: imageURL) }' \
   "$ROOT_DIR/ShotLens/Core/OCREngine.swift" >/dev/null
-rg -n -F 'ocr.recognize(image: captured.image)' \
+rg -n -F 'ocr.recognizeResult(image: captured.image)' \
   "$ROOT_DIR/ShotLens/App/ShotLensApp.swift" >/dev/null
 
 rg -n -F 'ClipboardManager().copyImageToClipboard(image: image)' \

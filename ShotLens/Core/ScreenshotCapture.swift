@@ -6,6 +6,8 @@ import ScreenCaptureKit
 
 struct CapturedScreenshot {
     let image: CGImage
+    /// The exact screen-space bounds represented by the integer pixel crop.
+    let screenRect: CGRect
     /// OCR helper 需要文件路径；只用于显示或剪贴板的裁剪不会落盘。
     let fileURL: URL?
     /// 用户实际框选区域在裁剪图中的像素坐标。OCR 可使用外围上下文，
@@ -97,14 +99,17 @@ struct ScreenshotCapture {
         }
         let selectedRect = userSelection ?? rect
         let userRectInImage = CGRect(
-            x: (selectedRect.minX - rect.minX) * scaleX,
-            y: (rect.maxY - selectedRect.maxY) * scaleY,
+            x: (selectedRect.minX - frozenSnapshot.screenRect.minX) * scaleX - minX,
+            y: (frozenSnapshot.screenRect.maxY - selectedRect.maxY) * scaleY - minY,
             width: selectedRect.width * scaleX,
             height: selectedRect.height * scaleY
         ).intersection(CGRect(x: 0, y: 0, width: cropRect.width, height: cropRect.height))
 
         return CapturedScreenshot(
             image: normalizedImage,
+            screenRect: CGRect(x: frozenSnapshot.screenRect.minX + minX / scaleX,
+                               y: frozenSnapshot.screenRect.maxY - maxY / scaleY,
+                               width: cropRect.width / scaleX, height: cropRect.height / scaleY),
             fileURL: outputURL,
             userSelectionRectInImage: userRectInImage
         )
@@ -229,13 +234,33 @@ enum SelectionGeometry {
 
     static func shouldInclude(_ candidate: CGRect, in userSelection: CGRect) -> Bool {
         guard !candidate.isNull, candidate.width > 0, candidate.height > 0 else { return false }
-        let intersection = candidate.intersection(userSelection)
-        guard !intersection.isNull else { return false }
+        return userSelection.contains(candidate)
+    }
 
-        let candidateArea = max(candidate.width * candidate.height, 1)
-        let overlapRatio = intersection.width * intersection.height / candidateArea
-        let centerInside = userSelection.insetBy(dx: -max(2, candidate.height * 0.35), dy: -max(2, candidate.height * 0.35)).contains(candidate.mid)
-        return overlapRatio >= 0.18 || centerInside
+    static func isOutside(_ candidate: CGRect, selection: CGRect) -> Bool {
+        candidate.intersection(selection).isNull
+    }
+
+    static func selectedBlocks(from blocks: [TextBlock], in selection: CGRect) -> [TextBlock] {
+        blocks.compactMap { block in
+            if shouldInclude(block.boundingBox, in: selection) { return block }
+            let textLength = (block.text as NSString).length
+            let validRuns = block.selectableRuns.filter {
+                $0.range.location >= 0 && $0.range.location <= textLength
+                    && $0.range.length > 0 && $0.range.length <= textLength - $0.range.location
+            }.sorted { $0.range.location < $1.range.location }
+            let included = validRuns.filter { shouldInclude($0.boundingBox, in: selection) }
+            guard let first = included.first, let last = included.last else { return nil }
+            let range = NSRange(location: first.range.location,
+                                length: NSMaxRange(last.range) - first.range.location)
+            guard let textRange = Range(range, in: block.text),
+                  validRuns.filter({ NSIntersectionRange($0.range, range).length > 0 }).count == included.count else { return nil }
+            let text = String(block.text[textRange])
+            let box = included.dropFirst().reduce(first.boundingBox) { $0.union($1.boundingBox) }
+            return TextBlock(text: text, boundingBox: box, detectedLanguage: block.detectedLanguage,
+                             visualStyle: block.visualStyle,
+                             englishRuns: block.englishRuns.filter { selection.contains($0.boundingBox) })
+        }
     }
 
     /// 用于显示的截图已经按 captureRect 裁剪；显示比例必须基于该范围计算，

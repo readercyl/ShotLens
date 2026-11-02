@@ -104,6 +104,9 @@ struct AppUpdater {
 
     @MainActor
     func installDownloadedUpdate(from dmgURL: URL, replacing appURL: URL = Bundle.main.bundleURL) throws {
+        guard Bundle(url: appURL)?.bundleIdentifier != "com.qingcheng.shotlens.mac.development" else {
+            throw AppUpdaterError.developmentBuild
+        }
         let scriptURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("shotlens-updater-\(UUID().uuidString).sh")
         try Self.updaterScript.write(to: scriptURL, atomically: true, encoding: .utf8)
@@ -272,11 +275,14 @@ struct AppUpdater {
 
 enum AppUpdaterError: LocalizedError {
     case downloadFailed
+    case developmentBuild
 
     var errorDescription: String? {
         switch self {
         case .downloadFailed:
             return "下载安装包失败"
+        case .developmentBuild:
+            return "开发版不能安装正式更新"
         }
     }
 }

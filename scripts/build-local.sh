@@ -3,21 +3,37 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="ShotLens"
-APP_VERSION="${SHOTLENS_APP_VERSION:-v1.4.3}"
+BUILD_KIND="${SHOTLENS_BUILD_KIND:-development}"
+case "$BUILD_KIND" in
+  development) APP_BUNDLE_NAME="ShotLens 开发版"; DISPLAY_NAME="ShotLens 开发版"; BUNDLE_ID="com.qingcheng.shotlens.mac.development" ;;
+  release) APP_BUNDLE_NAME="ShotLens"; DISPLAY_NAME="ShotLens"; BUNDLE_ID="com.qingcheng.shotlens.mac" ;;
+  *) echo "Invalid build kind" >&2; exit 1 ;;
+esac
+APP_VERSION="${SHOTLENS_APP_VERSION:-v1.4.5}"
 BUNDLE_SHORT_VERSION="${APP_VERSION#v}"
 APP_BUILD="${SHOTLENS_APP_BUILD:-1}"
 MIN_MACOS_VERSION="14.0"
 SWIFT_TARGET="arm64-apple-macosx$MIN_MACOS_VERSION"
 BUILD_DIR="$ROOT_DIR/build/local"
-APP_DIR="$BUILD_DIR/$APP_NAME.app"
+APP_DIR="$BUILD_DIR/$APP_BUNDLE_NAME.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 EXECUTABLE="$MACOS_DIR/$APP_NAME"
 OCR_EXECUTABLE="$MACOS_DIR/ShotLensOCR"
 DEPLOY_DIR="${SHOTLENS_DEPLOY_DIR:-$BUILD_DIR}"
-DEPLOY_APP_DIR="$DEPLOY_DIR/$APP_NAME.app"
+DEPLOY_APP_DIR="$DEPLOY_DIR/$APP_BUNDLE_NAME.app"
 CODESIGN_IDENTITY="${SHOTLENS_CODESIGN_IDENTITY:-}"
+
+if [[ "$BUILD_KIND" == development ]]; then
+  resolved_deploy="$(/usr/bin/python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$DEPLOY_DIR")"
+  resolved_user_apps="$(/usr/bin/python3 -c 'import os; print(os.path.realpath(os.path.expanduser("~/Applications")))')"
+  case "$resolved_deploy" in
+    /Applications|/Applications/*|"$resolved_user_apps"|"$resolved_user_apps"/*)
+      echo "Development builds cannot be deployed into Applications." >&2
+      exit 1 ;;
+  esac
+fi
 
 # 本地候选默认使用固定证书，避免每次构建都变成 ad-hoc 签名并重置屏幕录制权限。
 if [[ -z "$CODESIGN_IDENTITY" ]]; then
@@ -56,17 +72,17 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
     <key>CFBundleDevelopmentRegion</key>
     <string>zh-Hans</string>
     <key>CFBundleDisplayName</key>
-    <string>ShotLens</string>
+    <string>$DISPLAY_NAME</string>
     <key>CFBundleExecutable</key>
     <string>ShotLens</string>
     <key>CFBundleIconFile</key>
     <string>ShotLens.icns</string>
     <key>CFBundleIdentifier</key>
-    <string>com.qingcheng.shotlens.mac</string>
+    <string>$BUNDLE_ID</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>ShotLens</string>
+    <string>$DISPLAY_NAME</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

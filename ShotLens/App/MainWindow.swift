@@ -3,6 +3,9 @@ import CoreGraphics
 import ServiceManagement
 
 final class MainWindowController: NSObject, NSTextFieldDelegate {
+    private var applicationDisplayName: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "ShotLens"
+    }
     private static let apiDetailsExpandedKey = "ShotLens_API_DetailsExpanded"
     private static let lastAutomaticUpdateCheckKey = "ShotLens_LastAutomaticUpdateCheck"
     private var window: NSWindow?
@@ -108,7 +111,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "ShotLens 控制台"
+        window.title = "\(applicationDisplayName) 控制台"
         window.isReleasedWhenClosed = false
         window.animationBehavior = .none
 
@@ -165,7 +168,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         textStack.alignment = .leading
         textStack.spacing = 2
 
-        textStack.addArrangedSubview(label("ShotLens", font: .systemFont(ofSize: 28, weight: .semibold)))
+        textStack.addArrangedSubview(label(applicationDisplayName, font: .systemFont(ofSize: 28, weight: .semibold)))
         textStack.addArrangedSubview(makeVersionRow())
 
         row.addArrangedSubview(icon)

@@ -30,7 +30,7 @@ if [[ -z "$CODESIGN_IDENTITY" ]]; then
   echo "Using local release signing identity: $CODESIGN_IDENTITY" >&2
 fi
 
-SHOTLENS_APP_VERSION="$APP_VERSION" SHOTLENS_DEPLOY_DIR="$STAGING_DIR" SHOTLENS_CODESIGN_IDENTITY="$CODESIGN_IDENTITY" "$ROOT_DIR/scripts/build-local.sh" >/dev/null
+SHOTLENS_BUILD_KIND=release SHOTLENS_APP_VERSION="$APP_VERSION" SHOTLENS_DEPLOY_DIR="$STAGING_DIR" SHOTLENS_CODESIGN_IDENTITY="$CODESIGN_IDENTITY" /bin/bash "$ROOT_DIR/scripts/build-local.sh" >/dev/null
 ln -s /Applications "$STAGING_DIR/Applications"
 
 APP_PATH="$STAGING_DIR/$APP_NAME.app"

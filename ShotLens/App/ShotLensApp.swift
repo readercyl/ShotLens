@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private static func migrateLegacyDefaultsIfNeeded() {
+        guard Bundle.main.bundleIdentifier != "com.qingcheng.shotlens.mac.development" else { return }
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: legacyDefaultsMigrationKey),
               let legacyDefaults = UserDefaults(suiteName: legacyDefaultsSuiteName) else { return }
@@ -453,6 +454,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ShotLensLogger.event("selection_cancelled", stage: "selection", outcome: "cancelled")
             return false
         }
+        let translationStartedUptime = ProcessInfo.processInfo.systemUptime
         ShotLensLogger.event(
             "selection_completed",
             stage: "selection",
@@ -512,10 +514,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return await showInteractiveOverlay(
             ocrCapture: ocrCapture,
             displayImage: displayCapture.image,
-            selection: selection,
+            displayCropRectInOCR: CGRect(
+                x: ocrCapture.userSelectionRectInImage.minX - displayCapture.userSelectionRectInImage.minX,
+                y: ocrCapture.userSelectionRectInImage.minY - displayCapture.userSelectionRectInImage.minY,
+                width: CGFloat(displayCapture.image.width), height: CGFloat(displayCapture.image.height)
+            ),
+            selection: displayCapture.screenRect,
             displayScale: displayScale,
             translationSettings: translationSettings,
-            run: run
+            run: run,
+            translationStartedUptime: translationStartedUptime
         )
     }
 
@@ -539,6 +547,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func translate(
         captured: CapturedScreenshot,
         displayPixelSize: CGSize,
+        displayCropRectInOCR: CGRect,
         overlay: OverlayWindow?,
         settings: TranslationSettings,
         run: ShotLensRunContext,
@@ -552,7 +561,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ShotLensLogger.event("ocr_started", stage: "ocr", fields: ["attempt": String(translationAttemptNumber)])
         let textBlocks: [TextBlock]
         do {
-            textBlocks = try await ocr.recognize(image: captured.image)
+            let recognition = try await ocr.recognizeResult(image: captured.image)
+            textBlocks = recognition.blocks
+            overlay?.recognitionUsedFast = recognition.usedFast
             try Task.checkCancellation()
         } catch {
             finishTranslationAttempt(attemptID)
@@ -563,9 +574,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let selectedTextBlocks = textBlocks.filter {
-            SelectionGeometry.shouldInclude($0.boundingBox, in: captured.userSelectionRectInImage)
-        }
+        let selectedTextBlocks = SelectionGeometry.selectedBlocks(from: textBlocks, in: captured.userSelectionRectInImage)
         guard !selectedTextBlocks.isEmpty else {
             finishTranslationAttempt(attemptID)
             ShotLensLogger.event("ocr_empty", level: .warning, stage: "ocr", outcome: "empty")
@@ -576,7 +585,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let displayTextBlocks = selectedTextBlocks.compactMap {
             SelectionGeometry.mapOCRBlockToDisplay(
                 $0,
-                userSelectionRectInOCR: captured.userSelectionRectInImage,
+                userSelectionRectInOCR: displayCropRectInOCR,
                 displayPixelSize: displayPixelSize
             )
         }
@@ -603,7 +612,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let contextTexts: [String]
         if contentPlan.shouldUseNearbyContext {
             let contextCandidates = textBlocks.filter {
-                !SelectionGeometry.shouldInclude($0.boundingBox, in: captured.userSelectionRectInImage)
+                SelectionGeometry.isOutside($0.boundingBox, selection: captured.userSelectionRectInImage)
             }
             contextTexts = TranslationContextBuilder.make(
                 from: contextCandidates,
@@ -846,6 +855,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startOCRTranslationAttempt(
         captured: CapturedScreenshot,
         displayPixelSize: CGSize,
+        displayCropRectInOCR: CGRect,
         overlay: OverlayWindow?,
         settings: TranslationSettings,
         run: ShotLensRunContext,
@@ -862,6 +872,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await self.translate(
                     captured: captured,
                     displayPixelSize: displayPixelSize,
+                    displayCropRectInOCR: displayCropRectInOCR,
                     overlay: overlay,
                     settings: settings,
                     run: run,
@@ -925,13 +936,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showInteractiveOverlay(
         ocrCapture: CapturedScreenshot,
         displayImage: CGImage,
+        displayCropRectInOCR: CGRect,
         selection: CGRect,
         displayScale: CGFloat,
         translationSettings: TranslationSettings,
-        run: ShotLensRunContext
+        run: ShotLensRunContext,
+        translationStartedUptime: TimeInterval
     ) async -> Bool {
         await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             let overlay = OverlayWindow()
+            overlay.translationStartedUptime = translationStartedUptime
             var shouldReselect = false
             self.resultOverlay = overlay
             overlay.onDismiss = { [weak self] in
@@ -948,6 +962,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.startOCRTranslationAttempt(
                     captured: ocrCapture,
                     displayPixelSize: CGSize(width: displayImage.width, height: displayImage.height),
+                    displayCropRectInOCR: displayCropRectInOCR,
                     overlay: overlay,
                     settings: translationSettings,
                     run: run,
@@ -958,7 +973,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlay.onRetranslate = retryOCR
             overlay.show(
                 croppedScreenshot: displayImage,
-                at: selection.origin,
+                in: selection,
                 displayScale: displayScale
             )
             ShotLensLogger.event(

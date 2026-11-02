@@ -9,8 +9,13 @@ struct OverlayGeometrySmoke {
         try assertTinySelectionKeepsReadableTranslationRect()
         try assertSmallSelectionGetsOCRContext()
         try assertBoundaryTextCanBeIncludedOnlyWhenItBelongsToSelection()
+        try assertFullySelectedWordsSurviveAClippedLine()
+        try assertSelectedCJKWordUsesUTF16Ranges()
+        try assertMalformedSelectionRangesAreIgnored()
+        try assertClippedTextIsNotUsedAsOutsideContext()
         try assertExpandedCaptureUsesItsOwnDisplayScale()
         try assertOCRCoordinatesMapBackToDisplaySelection()
+        try assertFractionalCropUsesActualPixelOrigin()
         try assertPixelRectKeepsExactTopLeftAnchor()
         try assertTextRemovalPreservesBackgroundVariation()
         try assertTextRemovalSurvivesImperfectForegroundEstimate()
@@ -21,12 +26,99 @@ struct OverlayGeometrySmoke {
         try assertShortContentStaysAnchored()
         try assertLongContentUsesStructuredReflow()
         try assertStatusTitleFitsBesideToggleButton()
+        try assertAlignedLabelsShareFontSizeWithoutFlatteningHeadings()
+        try assertUnrelatedColumnDoesNotTruncateAnchoredParagraph()
 
         print("Overlay geometry smoke test passed.")
     }
 
+    private static func assertMalformedSelectionRangesAreIgnored() throws {
+        let block = TextBlock(text: "Text", boundingBox: CGRect(x: 0, y: 0, width: 100, height: 20),
+                              detectedLanguage: "en", selectableRuns: [
+            SelectableTextRun(range: NSRange(location: Int.max, length: 20), boundingBox: CGRect(x: 20, y: 0, width: 20, height: 20))
+        ])
+        let selected = SelectionGeometry.selectedBlocks(from: [block], in: CGRect(x: 15, y: 0, width: 30, height: 20))
+        guard selected.isEmpty else { throw TestFailure("Malformed OCR offsets must be ignored") }
+    }
+
+    private static func assertUnrelatedColumnDoesNotTruncateAnchoredParagraph() throws {
+        let left = CGRect(x: 20, y: 20, width: 220, height: 30)
+        let right = CGRect(x: 500, y: 75, width: 200, height: 30)
+        let items = [left, right].map { rect in
+            OverlayTranslationLayoutItem(block: translatedBlock("文字", rect: rect), displayRect: rect)
+        }
+        let rects = OverlayTranslationLayout.anchoredRects(for: items, canvas: CGRect(x: 0, y: 0, width: 800, height: 300))
+        guard rects[0].maxY == 300 else {
+            throw TestFailure("A separate column must not shorten another region's text area")
+        }
+    }
+
+    private static func assertSelectedCJKWordUsesUTF16Ranges() throws {
+        let block = TextBlock(text: "😀中文内容", boundingBox: CGRect(x: 0, y: 0, width: 90, height: 20),
+                              detectedLanguage: "zh", selectableRuns: [
+            SelectableTextRun(range: NSRange(location: 2, length: 2), boundingBox: CGRect(x: 25, y: 0, width: 30, height: 20)),
+            SelectableTextRun(range: NSRange(location: 4, length: 2), boundingBox: CGRect(x: 58, y: 0, width: 30, height: 20))
+        ])
+        let selected = SelectionGeometry.selectedBlocks(from: [block], in: CGRect(x: 24, y: 0, width: 32, height: 20))
+        guard selected.count == 1, selected[0].text == "中文" else {
+            throw TestFailure("Partial selection must preserve Unicode word offsets")
+        }
+    }
+
+    private static func assertClippedTextIsNotUsedAsOutsideContext() throws {
+        let selection = CGRect(x: 20, y: 20, width: 40, height: 20)
+        guard !SelectionGeometry.isOutside(CGRect(x: 18, y: 20, width: 22, height: 20), selection: selection),
+              SelectionGeometry.isOutside(CGRect(x: 80, y: 20, width: 22, height: 20), selection: selection) else {
+            throw TestFailure("Boundary-crossing text must not enter outside context")
+        }
+    }
+
+    private static func assertFractionalCropUsesActualPixelOrigin() throws {
+        let context = CGContext(data: nil, width: 200, height: 200, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let frozen = FrozenScreenshot(image: context.makeImage()!, screenRect: CGRect(x: 0, y: 0, width: 100, height: 100))
+        let selected = CGRect(x: 10.2, y: 20.2, width: 30.2, height: 20.2)
+        guard let crop = try ScreenshotCapture().crop(frozenSnapshot: frozen, selection: selected, writesPNG: false) else {
+            throw TestFailure("Fractional selection failed to crop")
+        }
+        guard abs(crop.screenRect.minX - 10) < 0.01, abs(crop.screenRect.maxY - 40.5) < 0.01,
+              abs(crop.userSelectionRectInImage.minX - 0.4) < 0.01,
+              abs(crop.userSelectionRectInImage.minY - 0.2) < 0.01 else {
+            throw TestFailure("Selection coordinates must use the rounded pixel crop origin")
+        }
+    }
+
+    private static func assertFullySelectedWordsSurviveAClippedLine() throws {
+        let block = TextBlock(text: "Open Settings Now", boundingBox: CGRect(x: 0, y: 0, width: 150, height: 20),
+                              detectedLanguage: "en", selectableRuns: [
+            SelectableTextRun(range: NSRange(location: 0, length: 4), boundingBox: CGRect(x: 0, y: 0, width: 40, height: 20)),
+            SelectableTextRun(range: NSRange(location: 5, length: 8), boundingBox: CGRect(x: 45, y: 0, width: 65, height: 20)),
+            SelectableTextRun(range: NSRange(location: 14, length: 3), boundingBox: CGRect(x: 115, y: 0, width: 35, height: 20))
+        ])
+        let selected = SelectionGeometry.selectedBlocks(from: [block], in: CGRect(x: 43, y: 0, width: 85, height: 20))
+        guard selected.count == 1, selected[0].text == "Settings", selected[0].boundingBox == CGRect(x: 45, y: 0, width: 65, height: 20) else {
+            throw TestFailure("A fully selected word must survive while partially selected neighbors are excluded")
+        }
+    }
+
+    private static func assertAlignedLabelsShareFontSizeWithoutFlatteningHeadings() throws {
+        func item(_ size: CGFloat, _ y: CGFloat) -> OverlayTranslationLayoutItem {
+            let style = TextBlockVisualStyle(confidence: 1, estimatedFontSize: size,
+                foregroundRed: 0.4, foregroundGreen: 0.4, foregroundBlue: 0.4,
+                foregroundLuminance: 0.4, strokeDensity: 0.2)
+            let rect = CGRect(x: 40, y: y, width: 100, height: size)
+            let source = TextBlock(text: "Label", boundingBox: rect, detectedLanguage: "en", visualStyle: style)
+            return OverlayTranslationLayoutItem(block: TranslatedBlock(original: source, translatedText: "标签"), displayRect: rect)
+        }
+        let items = [item(24, 10), item(29, 50), item(33, 90), item(38, 130), item(70, 200)]
+        let sizes = items.map { OverlayTranslationLayout.normalizedFontSize(for: $0, among: items) }
+        guard sizes[0] == sizes[1], sizes[1] == sizes[2], sizes[2] == sizes[3], sizes[4] == 70 else {
+            throw TestFailure("Related labels must keep a consistent size while headings remain distinct: \(sizes)")
+        }
+    }
+
     private static func assertStatusTitleFitsBesideToggleButton() throws {
-        let title = "翻译完成"
+        let title = "翻译完成·快速识别  123.4秒"
         let titleWidth = (title as NSString).size(withAttributes: [
             .font: NSFont.systemFont(ofSize: 13, weight: .medium)
         ]).width
@@ -154,8 +246,8 @@ struct OverlayGeometrySmoke {
             for: [item],
             canvas: CGRect(x: 0, y: 0, width: 1_000, height: 400)
         )
-        guard mode == .structured else {
-            throw TestFailure("Long paragraphs must use structured reflow")
+        guard mode == .anchored else {
+            throw TestFailure("Long paragraphs must retain their original anchor")
         }
     }
 
@@ -323,11 +415,14 @@ struct OverlayGeometrySmoke {
 
     private static func assertBoundaryTextCanBeIncludedOnlyWhenItBelongsToSelection() throws {
         let selection = CGRect(x: 20, y: 20, width: 40, height: 20)
-        guard SelectionGeometry.shouldInclude(
+        guard !SelectionGeometry.shouldInclude(
             CGRect(x: 18, y: 20, width: 22, height: 20),
             in: selection
         ) else {
-            throw TestFailure("A word crossing the selection edge should remain eligible")
+            throw TestFailure("A word crossing the selection edge must be excluded")
+        }
+        guard SelectionGeometry.shouldInclude(CGRect(x: 22, y: 22, width: 22, height: 16), in: selection) else {
+            throw TestFailure("A fully selected word must remain eligible")
         }
         guard !SelectionGeometry.shouldInclude(
             CGRect(x: 80, y: 20, width: 22, height: 20),

@@ -13,10 +13,21 @@ struct OCRProcessSmoke {
         let image = try makeImage()
         try await assertLargeOutputDoesNotDeadlock(image: image)
         try await assertCancellationStopsHelper(image: image)
+        try await assertSlowAccuratePassFallsBack(image: image)
+        try await assertFastFailureDoesNotDiscardAccurateResult(image: image)
         print("OCR process smoke test passed.")
     }
 
     private static func runFakeHelper() throws {
+        let mode = ProcessInfo.processInfo.environment["SHOTLENS_OCR_TEST_MODE"]
+        if mode == "fallback" && !CommandLine.arguments.contains("--fast") {
+            Thread.sleep(forTimeInterval: 10)
+            return
+        }
+        if mode == "fast-fails" {
+            if CommandLine.arguments.contains("--fast") { exit(2) }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
         if ProcessInfo.processInfo.environment["SHOTLENS_OCR_TEST_MODE"] == "sleep" {
             Thread.sleep(forTimeInterval: 10)
             return
@@ -31,6 +42,28 @@ struct OCRProcessSmoke {
             withJSONObject: Array(repeating: block, count: 3_000)
         )
         FileHandle.standardOutput.write(data)
+    }
+
+    private static func assertSlowAccuratePassFallsBack(image: CGImage) async throws {
+        setenv("SHOTLENS_OCR_TEST_MODE", "fallback", 1)
+        defer { unsetenv("SHOTLENS_OCR_TEST_MODE") }
+        let before = temporaryOCRFiles()
+        let started = ProcessInfo.processInfo.systemUptime
+        let result = try await OCREngine().recognizeResult(image: image, fastFallbackDelay: 0.1)
+        guard result.usedFast, result.blocks.count == 3_000,
+              ProcessInfo.processInfo.systemUptime - started < 3,
+              temporaryOCRFiles().subtracting(before).isEmpty else {
+            throw TestFailure("Slow accurate OCR must fall back and clean its temporary file")
+        }
+    }
+
+    private static func assertFastFailureDoesNotDiscardAccurateResult(image: CGImage) async throws {
+        setenv("SHOTLENS_OCR_TEST_MODE", "fast-fails", 1)
+        defer { unsetenv("SHOTLENS_OCR_TEST_MODE") }
+        let result = try await OCREngine().recognizeResult(image: image, fastFallbackDelay: 0.1)
+        guard !result.usedFast, result.blocks.count == 3_000 else {
+            throw TestFailure("A failed fast pass must not cancel a valid accurate pass")
+        }
     }
 
     private static func assertLargeOutputDoesNotDeadlock(image: CGImage) async throws {

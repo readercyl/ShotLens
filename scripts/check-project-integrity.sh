@@ -71,7 +71,7 @@ rg -n 'AppUpdater.swift' "$ROOT_DIR/ShotLens.xcodeproj/project.pbxproj" >/dev/nu
 rg -n 'OverlayControlVisibility.swift' "$ROOT_DIR/ShotLens.xcodeproj/project.pbxproj" >/dev/null
 rg -n 'InProcessSelectionOverlay.swift' "$ROOT_DIR/ShotLens.xcodeproj/project.pbxproj" >/dev/null
 rg -n "<string>$EXPECTED_BUNDLE_IDENTIFIER</string>" "$ROOT_DIR/ShotLens/App/Info.plist" >/dev/null
-rg -n "<string>$EXPECTED_BUNDLE_IDENTIFIER</string>" "$ROOT_DIR/scripts/build-local.sh" >/dev/null
+rg -n "BUNDLE_ID=\"$EXPECTED_BUNDLE_IDENTIFIER\"" "$ROOT_DIR/scripts/build-local.sh" >/dev/null
 test "$(rg -c "PRODUCT_BUNDLE_IDENTIFIER = $EXPECTED_BUNDLE_IDENTIFIER;" "$ROOT_DIR/ShotLens.xcodeproj/project.pbxproj")" -eq 2
 rg -n 'migrateLegacyDefaultsIfNeeded' "$ROOT_DIR/ShotLens/App/ShotLensApp.swift" >/dev/null
 rg -n 'chatCompletionsURL' "$ROOT_DIR/ShotLens/Core/LLMTranslator.swift" >/dev/null

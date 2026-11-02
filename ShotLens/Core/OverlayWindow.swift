@@ -86,18 +86,16 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     private var isRetranslating = false
     private var controlPhase: OverlayControlPhase = .processing
     private var translationStatusMessage = "翻译完成"
+    var translationStartedUptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    var recognitionUsedFast = false
 
     func show(
         croppedScreenshot: CGImage,
-        at screenPosition: CGPoint,
+        in selection: CGRect,
         displayScale: CGFloat
     ) {
         let scale = max(displayScale, 1.0)
-        let windowRect = OverlayGeometry.resultFrame(
-            screenshotPixelSize: CGSize(width: croppedScreenshot.width, height: croppedScreenshot.height),
-            screenPosition: screenPosition,
-            displayScale: scale
-        )
+        let windowRect = selection
 
         backdropWindows = makeBackdropWindows()
         startOutsideClickMonitor()
@@ -198,9 +196,12 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         translationStatusMessage = completedCount < totalCount
             ? "已完成 \(completedCount)/\(totalCount)"
             : "翻译完成"
+        if recognitionUsedFast { translationStatusMessage += "·快速识别" }
         contentView?.setTranslatedBlocks(blocks)
         contentView?.setDisplayMode(.translation)
         contentView?.displayIfNeeded()
+        let elapsed = max(0, ProcessInfo.processInfo.systemUptime - translationStartedUptime)
+        translationStatusMessage += String(format: "  %.1f秒", elapsed)
         setToggleStatus(message: translationStatusMessage)
         return max(0, Int((ProcessInfo.processInfo.systemUptime - renderStartedAt) * 1_000))
     }
@@ -224,6 +225,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
                 detail: presentation.detail,
                 actionTitle: actionTitle
             ) { [weak self] in
+                self?.translationStartedUptime = ProcessInfo.processInfo.systemUptime
                 self?.onRetry?()
             }
         } else {
@@ -321,6 +323,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     private func beginRetranslation() {
         guard !isRetranslating else { return }
         isRetranslating = true
+        translationStartedUptime = ProcessInfo.processInfo.systemUptime
         setProcessing("正在重新翻译...")
         onRetranslate?()
     }
@@ -1517,29 +1520,24 @@ enum OverlayTranslationRenderMode: Equatable {
 /// 将“翻译单元”和“最终排版区域”分离。
 /// OCR 语义块仍然保留用于上下文、阅读顺序和背景恢复，但译文不再被原始矩形锁死。
 enum OverlayTranslationLayout {
+    static func normalizedFontSize(for item: OverlayTranslationLayoutItem, among items: [OverlayTranslationLayoutItem]) -> CGFloat {
+        let style = item.block.original.visualStyle
+        let size = style.estimatedFontSize
+        guard size > 0 else { return size }
+        let related = items.filter { other in
+            let candidate = other.block.original.visualStyle
+            guard candidate.estimatedFontSize > 0 else { return false }
+            return abs(item.displayRect.minX - other.displayRect.minX) <= max(12, item.displayRect.height)
+        }.map { $0.block.original.visualStyle.estimatedFontSize }.sorted()
+        guard related.count >= 3 else { return size }
+        let median = related[related.count / 2]
+        guard size >= median * 0.70, size <= median * 1.25 else { return size }
+        return median
+    }
     static func renderMode(
         for items: [OverlayTranslationLayoutItem],
         canvas: CGRect
     ) -> OverlayTranslationRenderMode {
-        guard !items.isEmpty, canvas.width > 0, canvas.height > 0 else { return .anchored }
-        let translatedItems = items.filter {
-            $0.block.translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
-                != $0.block.original.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        guard !translatedItems.isEmpty else { return .anchored }
-        let totalCharacters = translatedItems.reduce(0) { $0 + $1.block.translatedText.count }
-        let longestBlock = translatedItems.map { $0.block.translatedText.count }.max() ?? 0
-        let verticalSpan = (translatedItems.map(\.displayRect.maxY).max() ?? 0)
-            - (translatedItems.map(\.displayRect.minY).min() ?? 0)
-        let hasDenseReadingColumn = translatedItems.count >= 4
-            && verticalSpan >= canvas.height * 0.45
-            && translatedItems.map(\.displayRect.minX).max()! - translatedItems.map(\.displayRect.minX).min()! <= max(36, canvas.width * 0.08)
-
-        if longestBlock >= 240
-            || totalCharacters >= 520
-            || (hasDenseReadingColumn && totalCharacters >= 320) {
-            return .structured
-        }
         return .anchored
     }
 
@@ -1548,8 +1546,8 @@ enum OverlayTranslationLayout {
         canvas: CGRect,
         padding: CGFloat = 16
     ) -> [CGRect] {
-        let horizontalPadding = min(padding, max(0, canvas.width * 0.08))
-        let verticalPadding = min(padding, max(0, canvas.height * 0.08))
+        let horizontalPadding: CGFloat = 0
+        let verticalPadding: CGFloat = 0
         let contentRect = canvas.insetBy(
             dx: horizontalPadding,
             dy: verticalPadding
@@ -1573,7 +1571,11 @@ enum OverlayTranslationLayout {
                 .min { $0.displayRect.minX < $1.displayRect.minX }
             let right = sameRow.map { $0.displayRect.minX - 8 } ?? contentRect.maxX
             let nextRow = ordered
-                .filter { $0.displayRect.minY > source.maxY + max(4, source.height * 0.25) }
+                .filter {
+                    $0.displayRect.minY > source.maxY + max(4, source.height * 0.25)
+                        && $0.displayRect.maxX > source.minX
+                        && $0.displayRect.minX < source.maxX
+                }
                 .min { $0.displayRect.minY < $1.displayRect.minY }
             let bottom = nextRow.map { $0.displayRect.minY - 8 } ?? contentRect.maxY
             let left = max(contentRect.minX, source.minX)
@@ -1933,6 +1935,8 @@ final class OverlayContentView: NSView {
             return lhs.minX < rhs.minX
         }
         let layoutItems = sortedBlocks.compactMap { block -> OverlayTranslationLayoutItem? in
+            guard block.translatedText.trimmingCharacters(in: .whitespacesAndNewlines)
+                != block.original.text.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
             let displayRect = OverlayGeometry.displayRect(
                 forPixelRect: block.original.boundingBox,
                 screenshotPixelSize: screenshotSize,
@@ -2023,7 +2027,9 @@ final class OverlayContentView: NSView {
             return $0.displayRect.minX < $1.displayRect.minX
         }
         for (item, rect) in zip(ordered, rects) {
-            let targetSize = targetFontSize(for: [item])
+            let normalizedSize = OverlayTranslationLayout.normalizedFontSize(for: item, among: items)
+            let pixelScaleY = screenshot.map { CGFloat($0.height) / max(bounds.height, 1) } ?? max(displayScale, 1)
+            let targetSize = normalizedSize > 0 ? normalizedSize / max(pixelScaleY, 1) : targetFontSize(for: [item])
             let measurement = OverlayTranslationTextFit.measure(
                 text: item.block.translatedText,
                 in: rect,
@@ -2055,7 +2061,7 @@ final class OverlayContentView: NSView {
                 ? item.block.original.visualStyle.estimatedFontSize / max(pixelScaleY, 1)
                 : 14
         }
-        return min(20, max(11, sourceSizes.reduce(0, +) / CGFloat(max(1, sourceSizes.count))))
+        return max(1, sourceSizes.reduce(0, +) / CGFloat(max(1, sourceSizes.count)))
     }
 
     private func restoreBackground(
@@ -2104,7 +2110,12 @@ final class OverlayContentView: NSView {
             return cached
         }
         guard let screenshot else { return .windowBackgroundColor }
-        let color = screenshot.averageColor(in: pixelRect) ?? .windowBackgroundColor
+        // The OCR rectangle contains glyphs. Sampling it as background can make
+        // otherwise identical labels switch between their source color and black.
+        let sampleY = pixelRect.minY >= 3 ? pixelRect.minY - 3 : pixelRect.maxY
+        let sample = CGRect(x: pixelRect.minX, y: sampleY, width: pixelRect.width, height: 3)
+        let color = screenshot.averageColor(in: sample)
+            ?? screenshot.averageColor(in: pixelRect) ?? .windowBackgroundColor
         sampledColorCache[cacheKey] = color
         return color
     }
@@ -2126,7 +2137,12 @@ final class OverlayContentView: NSView {
                 blue: sourceStyle.foregroundBlue,
                 alpha: 1
             )
-            if sourceColor.contrastRatio(againstLuminance: backgroundLuminance) >= 3.2 {
+            if sourceColor.contrastRatio(againstLuminance: backgroundLuminance) >= 2.5 {
+                // OCR samples include antialiased edge pixels, so their average is
+                // lighter than the original glyph on a light background.
+                if backgroundLuminance > 0.65, sourceStyle.foregroundLuminance < backgroundLuminance {
+                    return sourceColor.blended(withFraction: 0.18, of: .black) ?? sourceColor
+                }
                 return sourceColor
             }
         }

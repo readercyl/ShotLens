@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 /// OCR 文本块的视觉特征，用来辅助判断同一语义段落。
 struct TextBlockVisualStyle: Codable, Equatable {
@@ -53,6 +54,11 @@ struct TextRun: Equatable {
     let boundingBox: CGRect
 }
 
+struct SelectableTextRun: Equatable {
+    let range: NSRange
+    let boundingBox: CGRect
+}
+
 /// OCR 识别出的单个文本行或语义块
 struct TextBlock {
     /// 识别出的原文
@@ -65,19 +71,22 @@ struct TextBlock {
     let visualStyle: TextBlockVisualStyle
     /// 行内可翻译的英文子范围；中文和数字仅作为受保护的语义上下文。
     let englishRuns: [TextRun]
+    let selectableRuns: [SelectableTextRun]
 
     init(
         text: String,
         boundingBox: CGRect,
         detectedLanguage: String,
         visualStyle: TextBlockVisualStyle = .unknown,
-        englishRuns: [TextRun] = []
+        englishRuns: [TextRun] = [],
+        selectableRuns: [SelectableTextRun] = []
     ) {
         self.text = text
         self.boundingBox = boundingBox
         self.detectedLanguage = detectedLanguage
         self.visualStyle = visualStyle
         self.englishRuns = englishRuns
+        self.selectableRuns = selectableRuns
     }
 }
 
