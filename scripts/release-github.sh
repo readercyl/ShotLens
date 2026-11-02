@@ -48,4 +48,10 @@ gh release create "$VERSION" "$DMG_PATH" \
   --title "ShotLens $VERSION" \
   --notes-file "$RELEASE_NOTES_PATH"
 
+# 发布完成后清掉本机开发版：否则 Spotlight 里发版后仍会同时出现正式版和开发版。
+# 清理失败不改变发布结果，只提示。
+if ! "$ROOT_DIR/scripts/clean-dev-app.sh"; then
+  echo "Note: local development app was not removed; quit it and rerun scripts/clean-dev-app.sh." >&2
+fi
+
 echo "$VERSION"
