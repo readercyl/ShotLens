@@ -49,4 +49,12 @@ hdiutil verify "$DMG_PATH" >/dev/null
 xattr -cr "$DMG_PATH" 2>/dev/null || true
 "$ROOT_DIR/scripts/check-no-private-config.sh" "$DMG_PATH" "$APP_PATH"
 
+# 打包完成后清掉暂存目录：DMG 已产出，暂存里的 App 只是可再生成的副本，
+# 留着会让 Spotlight/LaunchServices 多出一条同名 App。
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+if [[ -x "$LSREGISTER" ]]; then
+  "$LSREGISTER" -u "$APP_PATH" >/dev/null 2>&1 || true
+fi
+rm -rf "$STAGING_DIR"
+
 echo "$DMG_PATH"

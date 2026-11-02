@@ -15,14 +15,14 @@ APP_BUILD="${SHOTLENS_APP_BUILD:-1}"
 MIN_MACOS_VERSION="14.0"
 SWIFT_TARGET="arm64-apple-macosx$MIN_MACOS_VERSION"
 BUILD_DIR="$ROOT_DIR/build/local"
-APP_DIR="$BUILD_DIR/$APP_BUNDLE_NAME.app"
+DEPLOY_DIR="${SHOTLENS_DEPLOY_DIR:-$BUILD_DIR}"
+APP_DIR="$DEPLOY_DIR/$APP_BUNDLE_NAME.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 EXECUTABLE="$MACOS_DIR/$APP_NAME"
 OCR_EXECUTABLE="$MACOS_DIR/ShotLensOCR"
-DEPLOY_DIR="${SHOTLENS_DEPLOY_DIR:-$BUILD_DIR}"
-DEPLOY_APP_DIR="$DEPLOY_DIR/$APP_BUNDLE_NAME.app"
+DEPLOY_APP_DIR="$APP_DIR"
 CODESIGN_IDENTITY="${SHOTLENS_CODESIGN_IDENTITY:-}"
 
 resolved_deploy="$(/usr/bin/python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$DEPLOY_DIR")"
@@ -110,16 +110,6 @@ else
   codesign --force --deep --sign - "$APP_DIR" >/dev/null
 fi
 
-mkdir -p "$DEPLOY_DIR"
-if [[ "$DEPLOY_APP_DIR" != "$APP_DIR" ]]; then
-  rm -rf "$DEPLOY_APP_DIR"
-  ditto "$APP_DIR" "$DEPLOY_APP_DIR"
-  xattr -dr com.apple.quarantine "$DEPLOY_APP_DIR" 2>/dev/null || true
-  if [[ -n "$CODESIGN_IDENTITY" ]]; then
-    codesign --force --deep --sign "$CODESIGN_IDENTITY" "$DEPLOY_APP_DIR" >/dev/null
-  else
-    codesign --force --deep --sign - "$DEPLOY_APP_DIR" >/dev/null
-  fi
-fi
+# 直接构建到部署目录：打包时不再在 build/local 留下第二份同 Bundle ID 的 App。
 
 echo "$DEPLOY_APP_DIR"
