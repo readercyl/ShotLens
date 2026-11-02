@@ -548,6 +548,7 @@ private final class OverlayToolbarWindow: NSPanel {
 
     func showFeedback(_ message: String) {
         toolbarView.showFeedback(message)
+        updateFrame()
     }
 
     private func updateFrame() {
@@ -600,6 +601,51 @@ private final class OverlayToolbarStatusLabel: NSView {
     }
 }
 
+enum OverlayToolbarGeometry {
+    static let height: CGFloat = 34
+    static let minimumMessageWidth: CGFloat = 66
+    static let messageHorizontalPadding: CGFloat = 16
+    static let messageToButtonsGap: CGFloat = 8
+    static let buttonSize: CGFloat = 28
+    static let buttonGap: CGFloat = 6
+    static let trailingPadding: CGFloat = 8
+
+    static func messageWidth(
+        for text: String,
+        font: NSFont = .systemFont(ofSize: 12, weight: .medium)
+    ) -> CGFloat {
+        let measured = ceil((text as NSString).size(withAttributes: [.font: font]).width)
+        return max(minimumMessageWidth, measured + messageHorizontalPadding)
+    }
+
+    static func preferredSize(for text: String) -> CGSize {
+        let buttonsWidth = buttonSize * 4 + buttonGap * 3
+        return CGSize(
+            width: messageWidth(for: text) + messageToButtonsGap + buttonsWidth + trailingPadding,
+            height: height
+        )
+    }
+
+    static func frames(for text: String) -> (message: CGRect, buttons: [CGRect], separatorX: CGFloat) {
+        let message = CGRect(
+            x: 8,
+            y: 0,
+            width: messageWidth(for: text),
+            height: height
+        )
+        let buttonsStart = message.maxX + messageToButtonsGap
+        let buttons = (0..<4).map { index in
+            CGRect(
+                x: buttonsStart + CGFloat(index) * (buttonSize + buttonGap),
+                y: 3,
+                width: buttonSize,
+                height: buttonSize
+            )
+        }
+        return (message, buttons, message.maxX + messageToButtonsGap / 2)
+    }
+}
+
 private final class OverlayToolbarView: NSView {
     var onToggleMode: (() -> Void)? {
         didSet { modeButton.onClick = onToggleMode }
@@ -634,7 +680,7 @@ private final class OverlayToolbarView: NSView {
     override var mouseDownCanMoveWindow: Bool { false }
 
     var preferredSize: CGSize {
-        CGSize(width: 222, height: 34)
+        OverlayToolbarGeometry.preferredSize(for: messageLabel.text)
     }
 
     override init(frame frameRect: NSRect) {
@@ -695,11 +741,12 @@ private final class OverlayToolbarView: NSView {
         case .processing, .failure:
             break
         }
-        messageLabel.frame = CGRect(x: 8, y: 0, width: 66, height: 34)
-        modeButton.frame = CGRect(x: 82, y: 3, width: 28, height: 28)
-        copyButton.frame = CGRect(x: 116, y: 3, width: 28, height: 28)
-        retranslateButton.frame = CGRect(x: 150, y: 3, width: 28, height: 28)
-        copyImageButton.frame = CGRect(x: 184, y: 3, width: 28, height: 28)
+        let frames = OverlayToolbarGeometry.frames(for: messageLabel.text)
+        messageLabel.frame = frames.message
+        modeButton.frame = frames.buttons[0]
+        copyButton.frame = frames.buttons[1]
+        retranslateButton.frame = frames.buttons[2]
+        copyImageButton.frame = frames.buttons[3]
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -711,8 +758,9 @@ private final class OverlayToolbarView: NSView {
         border.stroke()
         NSColor.separatorColor.withAlphaComponent(0.7).setStroke()
         let separator = NSBezierPath()
-        separator.move(to: CGPoint(x: 77.5, y: 7))
-        separator.line(to: CGPoint(x: 77.5, y: bounds.maxY - 7))
+        let separatorX = OverlayToolbarGeometry.frames(for: messageLabel.text).separatorX
+        separator.move(to: CGPoint(x: separatorX, y: 7))
+        separator.line(to: CGPoint(x: separatorX, y: bounds.maxY - 7))
         separator.lineWidth = 1
         separator.stroke()
     }

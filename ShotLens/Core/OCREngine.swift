@@ -14,28 +14,27 @@ struct OCREngine {
         try await recognizeResult(image: image).blocks
     }
 
-    func recognizeResult(image: CGImage, fastFallbackDelay: TimeInterval = 10) async throws -> OCRRecognition {
+    func recognizeResult(image: CGImage) async throws -> OCRRecognition {
         try Task.checkCancellation()
         let imageURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("ShotLens-OCR-\(UUID().uuidString)")
             .appendingPathExtension("png")
         try writePNG(image, to: imageURL)
         defer { try? FileManager.default.removeItem(at: imageURL) }
-        return try await recognizeResult(imageFile: imageURL, fastFallbackDelay: fastFallbackDelay)
+        return try await recognizeResult(imageFile: imageURL)
     }
 
     func recognize(imageFile url: URL) async throws -> [TextBlock] {
-        try await recognizeResult(imageFile: url, fastFallbackDelay: 10).blocks
+        try await recognizeResult(imageFile: url).blocks
     }
 
-    private func recognizeResult(imageFile url: URL, fastFallbackDelay: TimeInterval) async throws -> OCRRecognition {
+    private func recognizeResult(imageFile url: URL) async throws -> OCRRecognition {
         try Task.checkCancellation()
         let helperURL = try locateHelper()
-        _ = fastFallbackDelay
 
         do {
             let fastBlocks = try await runHelper(helperURL: helperURL, imageURL: url, fast: true)
-            if !fastBlocks.isEmpty {
+            if Self.shouldAcceptFastResult(fastBlocks) {
                 return OCRRecognition(blocks: fastBlocks, usedFast: true)
             }
         } catch is CancellationError {
@@ -47,6 +46,15 @@ struct OCREngine {
 
         let accurateBlocks = try await runHelper(helperURL: helperURL, imageURL: url, fast: false)
         return OCRRecognition(blocks: accurateBlocks, usedFast: false)
+    }
+
+    static func shouldAcceptFastResult(_ blocks: [TextBlock]) -> Bool {
+        guard !blocks.isEmpty else { return false }
+        let scored = blocks.map(\.visualStyle.confidence).filter { $0 > 0 }
+        guard !scored.isEmpty else { return true }
+        let averageConfidence = scored.reduce(0, +) / Float(scored.count)
+        let lowConfidenceRatio = Float(scored.filter { $0 < 0.45 }.count) / Float(scored.count)
+        return averageConfidence >= 0.45 && lowConfidenceRatio < 0.35
     }
 
     private func writePNG(_ image: CGImage, to url: URL) throws {

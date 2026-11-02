@@ -15,6 +15,7 @@ struct OCRProcessSmoke {
         try await assertCancellationStopsHelper(image: image)
         try await assertFastPassIsPrimary(image: image)
         try await assertFastFailureFallsBackToAccurate(image: image)
+        try await assertLowConfidenceFastPassFallsBackToAccurate(image: image)
         print("OCR process smoke test passed.")
     }
 
@@ -27,6 +28,25 @@ struct OCRProcessSmoke {
         if mode == "fast-fails" {
             if CommandLine.arguments.contains("--fast") { exit(2) }
             Thread.sleep(forTimeInterval: 0.3)
+        }
+        if mode == "fast-incomplete" && CommandLine.arguments.contains("--fast") {
+            let block: [String: Any] = [
+                "text": "Partial OCR",
+                "boundingBox": ["x": 1, "y": 1, "width": 40, "height": 12],
+                "detectedLanguage": "en",
+                "visualStyle": [
+                    "confidence": 0.1,
+                    "estimatedFontSize": 12,
+                    "foregroundRed": 0,
+                    "foregroundGreen": 0,
+                    "foregroundBlue": 0,
+                    "foregroundLuminance": 0,
+                    "strokeDensity": 0.2
+                ]
+            ]
+            let data = try JSONSerialization.data(withJSONObject: [block])
+            FileHandle.standardOutput.write(data)
+            return
         }
         if ProcessInfo.processInfo.environment["SHOTLENS_OCR_TEST_MODE"] == "sleep" {
             Thread.sleep(forTimeInterval: 10)
@@ -49,7 +69,7 @@ struct OCRProcessSmoke {
         defer { unsetenv("SHOTLENS_OCR_TEST_MODE") }
         let before = temporaryOCRFiles()
         let started = ProcessInfo.processInfo.systemUptime
-        let result = try await OCREngine().recognizeResult(image: image, fastFallbackDelay: 0.1)
+        let result = try await OCREngine().recognizeResult(image: image)
         guard result.usedFast, result.blocks.count == 3_000,
               ProcessInfo.processInfo.systemUptime - started < 3,
               temporaryOCRFiles().subtracting(before).isEmpty else {
@@ -60,9 +80,18 @@ struct OCRProcessSmoke {
     private static func assertFastFailureFallsBackToAccurate(image: CGImage) async throws {
         setenv("SHOTLENS_OCR_TEST_MODE", "fast-fails", 1)
         defer { unsetenv("SHOTLENS_OCR_TEST_MODE") }
-        let result = try await OCREngine().recognizeResult(image: image, fastFallbackDelay: 0.1)
+        let result = try await OCREngine().recognizeResult(image: image)
         guard !result.usedFast, result.blocks.count == 3_000 else {
             throw TestFailure("A failed fast pass must fall back to a valid accurate pass")
+        }
+    }
+
+    private static func assertLowConfidenceFastPassFallsBackToAccurate(image: CGImage) async throws {
+        setenv("SHOTLENS_OCR_TEST_MODE", "fast-incomplete", 1)
+        defer { unsetenv("SHOTLENS_OCR_TEST_MODE") }
+        let result = try await OCREngine().recognizeResult(image: image)
+        guard !result.usedFast, result.blocks.count == 3_000 else {
+            throw TestFailure("A non-empty low-confidence fast pass must fall back to accurate OCR")
         }
     }
 

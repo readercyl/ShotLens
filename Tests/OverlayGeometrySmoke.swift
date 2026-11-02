@@ -26,6 +26,7 @@ struct OverlayGeometrySmoke {
         try assertShortContentStaysAnchored()
         try assertLongContentUsesStructuredReflow()
         try assertStatusTitleFitsBesideToggleButton()
+        try assertToolbarExpandsForElapsedStatus()
         try assertAlignedLabelsShareFontSizeWithoutFlatteningHeadings()
         try assertUnrelatedColumnDoesNotTruncateAnchoredParagraph()
 
@@ -142,6 +143,22 @@ struct OverlayGeometrySmoke {
 
         guard textRect.width >= ceil(titleWidth) else {
             throw TestFailure("Translation status title is clipped beside its toggle button: \(textRect.width) < \(titleWidth)")
+        }
+    }
+
+    private static func assertToolbarExpandsForElapsedStatus() throws {
+        let short = OverlayToolbarGeometry.preferredSize(for: "已翻译")
+        let elapsed = "翻译完成·快速识别  123.4秒"
+        let expanded = OverlayToolbarGeometry.preferredSize(for: elapsed)
+        let frames = OverlayToolbarGeometry.frames(for: elapsed)
+        guard expanded.width > short.width,
+              frames.message.width >= OverlayToolbarGeometry.messageWidth(for: elapsed),
+              frames.buttons.count == 4,
+              frames.message.maxX < frames.buttons[0].minX,
+              zip(frames.buttons, frames.buttons.dropFirst()).allSatisfy({
+                  $0.maxX + OverlayToolbarGeometry.buttonGap <= $1.minX + 0.01
+              }) else {
+            throw TestFailure("Toolbar must expand and keep elapsed status separate from all buttons")
         }
     }
 
