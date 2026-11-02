@@ -7,12 +7,6 @@ struct OCRRecognition {
     let usedFast: Bool
 }
 
-private struct OCRAttemptOutcome: @unchecked Sendable {
-    let result: OCRRecognition?
-    let error: Error?
-    let usedFast: Bool
-}
-
 /// OCR 客户端。真正的 Vision OCR 在 ShotLensOCR helper 进程内执行，
 /// 避免 Vision/ANE 崩溃时把主 app 一起带退出。
 struct OCREngine {
@@ -37,38 +31,22 @@ struct OCREngine {
     private func recognizeResult(imageFile url: URL, fastFallbackDelay: TimeInterval) async throws -> OCRRecognition {
         try Task.checkCancellation()
         let helperURL = try locateHelper()
-        let outcome = await withTaskGroup(of: OCRAttemptOutcome.self, returning: OCRAttemptOutcome.self) { group in
-            group.addTask {
-                do {
-                    let blocks = try await runHelper(helperURL: helperURL, imageURL: url, fast: false)
-                    return OCRAttemptOutcome(result: OCRRecognition(blocks: blocks, usedFast: false), error: nil, usedFast: false)
-                } catch {
-                    return OCRAttemptOutcome(result: nil, error: error, usedFast: false)
-                }
+        _ = fastFallbackDelay
+
+        do {
+            let fastBlocks = try await runHelper(helperURL: helperURL, imageURL: url, fast: true)
+            if !fastBlocks.isEmpty {
+                return OCRRecognition(blocks: fastBlocks, usedFast: true)
             }
-            group.addTask {
-                do {
-                    try await Task.sleep(nanoseconds: UInt64(max(0, fastFallbackDelay) * 1_000_000_000))
-                    let blocks = try await runHelper(helperURL: helperURL, imageURL: url, fast: true)
-                    return OCRAttemptOutcome(result: OCRRecognition(blocks: blocks, usedFast: true), error: nil, usedFast: true)
-                } catch {
-                    return OCRAttemptOutcome(result: nil, error: error, usedFast: true)
-                }
-            }
-            var accurateError: Error?
-            var fallbackError: Error?
-            for await attempt in group {
-                if let result = attempt.result, !attempt.usedFast || !result.blocks.isEmpty {
-                    group.cancelAll()
-                    return attempt
-                }
-                if attempt.usedFast { fallbackError = attempt.error } else { accurateError = attempt.error }
-            }
-            return OCRAttemptOutcome(result: nil, error: accurateError ?? fallbackError ?? OCREngineError.invalidHelperOutput, usedFast: false)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // Fast OCR is an optimization. A failed or empty pass falls back
+            // to the accurate helper below.
         }
-        try Task.checkCancellation()
-        if let result = outcome.result { return result }
-        throw outcome.error ?? OCREngineError.invalidHelperOutput
+
+        let accurateBlocks = try await runHelper(helperURL: helperURL, imageURL: url, fast: false)
+        return OCRRecognition(blocks: accurateBlocks, usedFast: false)
     }
 
     private func writePNG(_ image: CGImage, to url: URL) throws {

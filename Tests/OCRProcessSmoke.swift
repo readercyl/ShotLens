@@ -13,8 +13,8 @@ struct OCRProcessSmoke {
         let image = try makeImage()
         try await assertLargeOutputDoesNotDeadlock(image: image)
         try await assertCancellationStopsHelper(image: image)
-        try await assertSlowAccuratePassFallsBack(image: image)
-        try await assertFastFailureDoesNotDiscardAccurateResult(image: image)
+        try await assertFastPassIsPrimary(image: image)
+        try await assertFastFailureFallsBackToAccurate(image: image)
         print("OCR process smoke test passed.")
     }
 
@@ -44,7 +44,7 @@ struct OCRProcessSmoke {
         FileHandle.standardOutput.write(data)
     }
 
-    private static func assertSlowAccuratePassFallsBack(image: CGImage) async throws {
+    private static func assertFastPassIsPrimary(image: CGImage) async throws {
         setenv("SHOTLENS_OCR_TEST_MODE", "fallback", 1)
         defer { unsetenv("SHOTLENS_OCR_TEST_MODE") }
         let before = temporaryOCRFiles()
@@ -53,16 +53,16 @@ struct OCRProcessSmoke {
         guard result.usedFast, result.blocks.count == 3_000,
               ProcessInfo.processInfo.systemUptime - started < 3,
               temporaryOCRFiles().subtracting(before).isEmpty else {
-            throw TestFailure("Slow accurate OCR must fall back and clean its temporary file")
+            throw TestFailure("Fast OCR must be the primary pass and clean its temporary file")
         }
     }
 
-    private static func assertFastFailureDoesNotDiscardAccurateResult(image: CGImage) async throws {
+    private static func assertFastFailureFallsBackToAccurate(image: CGImage) async throws {
         setenv("SHOTLENS_OCR_TEST_MODE", "fast-fails", 1)
         defer { unsetenv("SHOTLENS_OCR_TEST_MODE") }
         let result = try await OCREngine().recognizeResult(image: image, fastFallbackDelay: 0.1)
         guard !result.usedFast, result.blocks.count == 3_000 else {
-            throw TestFailure("A failed fast pass must not cancel a valid accurate pass")
+            throw TestFailure("A failed fast pass must fall back to a valid accurate pass")
         }
     }
 
