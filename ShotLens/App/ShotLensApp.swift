@@ -563,7 +563,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let recognition = try await ocr.recognizeResult(image: captured.image)
             textBlocks = recognition.blocks
-            overlay?.recognitionUsedFast = recognition.usedFast
             try Task.checkCancellation()
         } catch {
             finishTranslationAttempt(attemptID)

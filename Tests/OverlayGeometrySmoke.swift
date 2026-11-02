@@ -27,6 +27,7 @@ struct OverlayGeometrySmoke {
         try assertLongContentUsesStructuredReflow()
         try assertStatusTitleFitsBesideToggleButton()
         try assertToolbarExpandsForElapsedStatus()
+        try assertToolbarTimeColors()
         try assertAlignedLabelsShareFontSizeWithoutFlatteningHeadings()
         try assertUnrelatedColumnDoesNotTruncateAnchoredParagraph()
 
@@ -159,6 +160,16 @@ struct OverlayGeometrySmoke {
                   $0.maxX + OverlayToolbarGeometry.buttonGap <= $1.minX + 0.01
               }) else {
             throw TestFailure("Toolbar must expand and keep elapsed status separate from all buttons")
+        }
+    }
+
+    private static func assertToolbarTimeColors() throws {
+        guard OverlayToolbarGeometry.timeColor(for: "5.0秒") == .systemGreen,
+              OverlayToolbarGeometry.timeColor(for: "5.1秒") == .systemYellow,
+              OverlayToolbarGeometry.timeColor(for: "10.0秒") == .systemYellow,
+              OverlayToolbarGeometry.timeColor(for: "10.1秒") == .systemRed,
+              OverlayToolbarGeometry.timeColor(for: "已翻译") == .labelColor else {
+            throw TestFailure("Toolbar time colors must follow the 5/10 second thresholds")
         }
     }
 

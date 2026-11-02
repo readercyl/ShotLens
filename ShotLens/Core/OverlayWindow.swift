@@ -87,7 +87,6 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
     private var controlPhase: OverlayControlPhase = .processing
     private var translationStatusMessage = "翻译完成"
     var translationStartedUptime: TimeInterval = ProcessInfo.processInfo.systemUptime
-    var recognitionUsedFast = false
 
     func show(
         croppedScreenshot: CGImage,
@@ -193,15 +192,12 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         controlPhase = .success
         isRetranslating = false
         isShowingTranslation = true
-        translationStatusMessage = completedCount < totalCount
-            ? "已完成 \(completedCount)/\(totalCount)"
-            : "翻译完成"
-        if recognitionUsedFast { translationStatusMessage += "·快速识别" }
+        translationStatusMessage = "翻译完成"
         contentView?.setTranslatedBlocks(blocks)
         contentView?.setDisplayMode(.translation)
         contentView?.displayIfNeeded()
         let elapsed = max(0, ProcessInfo.processInfo.systemUptime - translationStartedUptime)
-        translationStatusMessage += String(format: "  %.1f秒", elapsed)
+        translationStatusMessage = String(format: "%.1f秒", elapsed)
         setToggleStatus(message: translationStatusMessage)
         return max(0, Int((ProcessInfo.processInfo.systemUptime - renderStartedAt) * 1_000))
     }
@@ -644,6 +640,16 @@ enum OverlayToolbarGeometry {
         }
         return (message, buttons, message.maxX + messageToButtonsGap / 2)
     }
+
+    static func timeColor(for text: String) -> NSColor {
+        guard let match = text.range(of: #"^\s*([0-9]+(?:\.[0-9]+)?)秒\s*$"#, options: .regularExpression),
+              let seconds = Double(text[match].dropLast()) else {
+            return .labelColor
+        }
+        if seconds <= 5 { return .systemGreen }
+        if seconds <= 10 { return .systemYellow }
+        return .systemRed
+    }
 }
 
 private final class OverlayToolbarView: NSView {
@@ -774,7 +780,8 @@ private final class OverlayToolbarView: NSView {
 
         switch state {
         case .success(_, let message):
-            messageLabel.text = message == "翻译完成" ? "已翻译" : message
+            messageLabel.text = message
+            messageLabel.textColor = OverlayToolbarGeometry.timeColor(for: message)
             modeButton.isEnabled = true
             copyButton.isEnabled = true
             retranslateButton.isEnabled = true
@@ -782,6 +789,7 @@ private final class OverlayToolbarView: NSView {
             retranslateButton.label = "重新翻译"
         case .processing(let message):
             messageLabel.text = message
+            messageLabel.textColor = .labelColor
             modeButton.isEnabled = false
             copyButton.isEnabled = false
             retranslateButton.isEnabled = false
@@ -789,6 +797,7 @@ private final class OverlayToolbarView: NSView {
             retranslateButton.label = "重新翻译"
         case .failure(let message):
             messageLabel.text = message
+            messageLabel.textColor = .labelColor
             modeButton.isEnabled = false
             copyButton.isEnabled = false
             retranslateButton.isEnabled = true
