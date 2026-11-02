@@ -120,7 +120,7 @@ struct OverlayGeometrySmoke {
     }
 
     private static func assertStatusTitleFitsBesideToggleButton() throws {
-        let title = "翻译完成·快速识别  123.4秒"
+        let title = "123.4s"
         let titleWidth = (title as NSString).size(withAttributes: [
             .font: NSFont.systemFont(ofSize: 13, weight: .medium)
         ]).width
@@ -149,7 +149,7 @@ struct OverlayGeometrySmoke {
 
     private static func assertToolbarExpandsForElapsedStatus() throws {
         let short = OverlayToolbarGeometry.preferredSize(for: "已翻译")
-        let elapsed = "翻译完成·快速识别  123.4秒"
+        let elapsed = "1234.5s"
         let expanded = OverlayToolbarGeometry.preferredSize(for: elapsed)
         let frames = OverlayToolbarGeometry.frames(for: elapsed)
         guard expanded.width > short.width,
@@ -164,10 +164,10 @@ struct OverlayGeometrySmoke {
     }
 
     private static func assertToolbarTimeColors() throws {
-        guard OverlayToolbarGeometry.timeColor(for: "5.0秒") == .systemGreen,
-              OverlayToolbarGeometry.timeColor(for: "5.1秒") == .systemYellow,
-              OverlayToolbarGeometry.timeColor(for: "10.0秒") == .systemYellow,
-              OverlayToolbarGeometry.timeColor(for: "10.1秒") == .systemRed,
+        guard OverlayToolbarGeometry.timeColor(for: "5.0s") == .systemGreen,
+              OverlayToolbarGeometry.timeColor(for: "5.1s") == .systemYellow,
+              OverlayToolbarGeometry.timeColor(for: "10.0s") == .systemYellow,
+              OverlayToolbarGeometry.timeColor(for: "10.1s") == .systemRed,
               OverlayToolbarGeometry.timeColor(for: "已翻译") == .labelColor else {
             throw TestFailure("Toolbar time colors must follow the 5/10 second thresholds")
         }

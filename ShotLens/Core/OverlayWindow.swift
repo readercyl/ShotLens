@@ -197,7 +197,7 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         contentView?.setDisplayMode(.translation)
         contentView?.displayIfNeeded()
         let elapsed = max(0, ProcessInfo.processInfo.systemUptime - translationStartedUptime)
-        translationStatusMessage = String(format: "%.1f秒", elapsed)
+        translationStatusMessage = String(format: "%.1fs", elapsed)
         setToggleStatus(message: translationStatusMessage)
         return max(0, Int((ProcessInfo.processInfo.systemUptime - renderStartedAt) * 1_000))
     }
@@ -642,7 +642,7 @@ enum OverlayToolbarGeometry {
     }
 
     static func timeColor(for text: String) -> NSColor {
-        guard let match = text.range(of: #"^\s*([0-9]+(?:\.[0-9]+)?)秒\s*$"#, options: .regularExpression),
+        guard let match = text.range(of: #"^\s*([0-9]+(?:\.[0-9]+)?)s\s*$"#, options: .regularExpression),
               let seconds = Double(text[match].dropLast()) else {
             return .labelColor
         }
