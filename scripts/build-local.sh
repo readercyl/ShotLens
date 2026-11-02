@@ -25,15 +25,19 @@ DEPLOY_DIR="${SHOTLENS_DEPLOY_DIR:-$BUILD_DIR}"
 DEPLOY_APP_DIR="$DEPLOY_DIR/$APP_BUNDLE_NAME.app"
 CODESIGN_IDENTITY="${SHOTLENS_CODESIGN_IDENTITY:-}"
 
-if [[ "$BUILD_KIND" == development ]]; then
-  resolved_deploy="$(/usr/bin/python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$DEPLOY_DIR")"
-  resolved_user_apps="$(/usr/bin/python3 -c 'import os; print(os.path.realpath(os.path.expanduser("~/Applications")))')"
-  case "$resolved_deploy" in
-    /Applications|/Applications/*|"$resolved_user_apps"|"$resolved_user_apps"/*)
+resolved_deploy="$(/usr/bin/python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$DEPLOY_DIR")"
+resolved_user_apps="$(/usr/bin/python3 -c 'import os; print(os.path.realpath(os.path.expanduser("~/Applications")))')"
+case "$resolved_deploy" in
+  /Applications|/Applications/*|"$resolved_user_apps"|"$resolved_user_apps"/*)
+    if [[ "$BUILD_KIND" == development ]]; then
       echo "Development builds cannot be deployed into Applications." >&2
-      exit 1 ;;
-  esac
-fi
+      exit 1
+    fi
+    if [[ "${SHOTLENS_ALLOW_SYSTEM_INSTALL:-0}" != "1" ]]; then
+      echo "Refusing to install a local build into Applications; set SHOTLENS_ALLOW_SYSTEM_INSTALL=1 only for an intentional install." >&2
+      exit 1
+    fi ;;
+esac
 
 # 本地候选默认使用固定证书，避免每次构建都变成 ad-hoc 签名并重置屏幕录制权限。
 if [[ -z "$CODESIGN_IDENTITY" ]]; then
