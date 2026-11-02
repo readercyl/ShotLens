@@ -7,9 +7,22 @@ protocol TranslationSecretStore: AnyObject {
     func clear() throws
 }
 
+/// 让条目对任意调用方开放，避免每次重新构建（签名身份变化）后重新弹授权框。
+enum SecretKeychainAccess {
+    static let anyApplicationLabel = "ShotLens 翻译 API Key"
+
+    /// trustedApplications 传 nil 表示信任所有应用，等价于 `security add-generic-password -A`。
+    static func makeAnyApplicationAccess() -> SecAccess? {
+        var access: SecAccess?
+        guard SecAccessCreate(anyApplicationLabel as CFString, nil, &access) == errSecSuccess else { return nil }
+        return access
+    }
+}
+
 private final class KeychainTranslationSecretStore: TranslationSecretStore {
     private let service = Bundle.main.bundleIdentifier == "com.qingcheng.shotlens.mac.development" ? "com.qingcheng.shotlens.mac.development" : "com.qingcheng.shotlens.mac"
     private let account = "translation-api-key"
+    private static let accessMigrationKey = "ShotLens_KeychainAllowsAnyApplication"
 
     func load() throws -> String? {
         var query = baseQuery
@@ -20,6 +33,7 @@ private final class KeychainTranslationSecretStore: TranslationSecretStore {
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess else { throw TranslationSecretStoreError.keychain(status) }
         guard let data = result as? Data else { return nil }
+        widenAccessIfNeeded(storedData: data)
         return String(data: data, encoding: .utf8)
     }
 
@@ -30,11 +44,7 @@ private final class KeychainTranslationSecretStore: TranslationSecretStore {
             [kSecValueData as String: data] as CFDictionary
         )
         if status == errSecItemNotFound {
-            var item = baseQuery
-            item[kSecValueData as String] = data
-            item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            let addStatus = SecItemAdd(item as CFDictionary, nil)
-            guard addStatus == errSecSuccess else { throw TranslationSecretStoreError.keychain(addStatus) }
+            try addItem(with: data)
             return
         }
         guard status == errSecSuccess else { throw TranslationSecretStoreError.keychain(status) }
@@ -45,6 +55,44 @@ private final class KeychainTranslationSecretStore: TranslationSecretStore {
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw TranslationSecretStoreError.keychain(status)
         }
+    }
+
+    private func addItem(with data: Data) throws {
+        var item = baseQuery
+        item[kSecValueData as String] = data
+        if let access = SecretKeychainAccess.makeAnyApplicationAccess() {
+            item[kSecAttrAccess as String] = access
+        } else {
+            item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        }
+        let status = SecItemAdd(item as CFDictionary, nil)
+        guard status == errSecSuccess else { throw TranslationSecretStoreError.keychain(status) }
+    }
+
+    /// 旧条目由历史构建创建，ACL 绑定在当时的签名上，重新编译就会重新索要授权。
+    /// 第一次成功读取后就地把 ACL 放开；放不开时用宽松 ACL 重建一份，之后任何构建都不再询问。
+    private func widenAccessIfNeeded(storedData: Data) {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: Self.accessMigrationKey) else { return }
+        guard let item = currentItemReference() else { return }
+        guard let permissiveAccess = SecretKeychainAccess.makeAnyApplicationAccess() else { return }
+
+        if SecKeychainItemSetAccess(item, permissiveAccess) == errSecSuccess {
+            defaults.set(true, forKey: Self.accessMigrationKey)
+            return
+        }
+
+        guard SecItemDelete(baseQuery as CFDictionary) == errSecSuccess else { return }
+        guard (try? addItem(with: storedData)) != nil else { return }
+        defaults.set(true, forKey: Self.accessMigrationKey)
+    }
+
+    private func currentItemReference() -> SecKeychainItem? {
+        var query = baseQuery
+        query[kSecReturnRef as String] = true
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let result else { return nil }
+        return unsafeBitCast(result, to: SecKeychainItem.self)
     }
 
     private var baseQuery: [String: Any] {
