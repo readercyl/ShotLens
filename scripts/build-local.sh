@@ -9,7 +9,7 @@ case "$BUILD_KIND" in
   release) APP_BUNDLE_NAME="ShotLens"; DISPLAY_NAME="ShotLens"; BUNDLE_ID="com.qingcheng.shotlens.mac" ;;
   *) echo "Invalid build kind" >&2; exit 1 ;;
 esac
-APP_VERSION="${SHOTLENS_APP_VERSION:-v1.4.5}"
+APP_VERSION="${SHOTLENS_APP_VERSION:-v1.5.0}"
 BUNDLE_SHORT_VERSION="${APP_VERSION#v}"
 APP_BUILD="${SHOTLENS_APP_BUILD:-1}"
 MIN_MACOS_VERSION="14.0"
