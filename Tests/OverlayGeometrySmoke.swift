@@ -165,6 +165,8 @@ struct OverlayGeometrySmoke {
 
     private static func assertToolbarTimeColors() throws {
         guard OverlayToolbarGeometry.timeColor(for: "5.0s") == .systemGreen,
+              OverlayToolbarGeometry.timeColor(for: "翻译完成  5.0s") == .systemGreen,
+              OverlayToolbarGeometry.timeColor(for: "已完成 1/2  10.1s") == .systemRed,
               OverlayToolbarGeometry.timeColor(for: "5.1s") == .systemYellow,
               OverlayToolbarGeometry.timeColor(for: "10.0s") == .systemYellow,
               OverlayToolbarGeometry.timeColor(for: "10.1s") == .systemRed,

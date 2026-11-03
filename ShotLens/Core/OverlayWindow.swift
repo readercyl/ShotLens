@@ -192,12 +192,14 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
         controlPhase = .success
         isRetranslating = false
         isShowingTranslation = true
-        translationStatusMessage = "翻译完成"
+        translationStatusMessage = completedCount < totalCount
+            ? "已完成 \(completedCount)/\(totalCount)"
+            : "翻译完成"
         contentView?.setTranslatedBlocks(blocks)
         contentView?.setDisplayMode(.translation)
         contentView?.displayIfNeeded()
         let elapsed = max(0, ProcessInfo.processInfo.systemUptime - translationStartedUptime)
-        translationStatusMessage = String(format: "%.1fs", elapsed)
+        translationStatusMessage += String(format: "  %.1fs", elapsed)
         setToggleStatus(message: translationStatusMessage)
         return max(0, Int((ProcessInfo.processInfo.systemUptime - renderStartedAt) * 1_000))
     }
@@ -642,8 +644,8 @@ enum OverlayToolbarGeometry {
     }
 
     static func timeColor(for text: String) -> NSColor {
-        guard let match = text.range(of: #"^\s*([0-9]+(?:\.[0-9]+)?)s\s*$"#, options: .regularExpression),
-              let seconds = Double(text[match].dropLast()) else {
+        guard let match = text.range(of: #"[0-9]+(?:\.[0-9]+)?s\s*$"#, options: .regularExpression),
+              let seconds = Double(text[match].trimmingCharacters(in: .whitespaces).dropLast()) else {
             return .labelColor
         }
         if seconds <= 5 { return .systemGreen }
