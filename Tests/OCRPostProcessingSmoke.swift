@@ -11,11 +11,16 @@ struct OCRPostProcessingSmoke {
         let iconRows = [
             make("LI Top Models", x: 92, y: 350, width: 202, height: 30, runs: [("LI", 92), ("Top", 133)]),
             make("D Open / Closed", x: 96, y: 400, width: 240, height: 30, runs: [("Open", 131)]),
-            make("‹≥ Programming", x: 88, y: 450, width: 232, height: 30, runs: [("Programming", 130)])
+            make("‹≥ Programming", x: 88, y: 450, width: 232, height: 30, runs: [("Programming", 130)]),
+            make("O Open/ Closed", x: 88, y: 500, width: 232, height: 30, runs: [("Open", 130)])
         ]
         let cleaned = ShotLensOCR.removeAlignedIconPrefixes(peers + iconRows)
-        guard cleaned.suffix(3).map(\.text) == ["Top Models", "Open / Closed", "Programming"] else {
+        guard cleaned.suffix(4).map(\.text) == ["Top Models", "Open / Closed", "Programming", "Open/ Closed"] else {
             throw Failure("Aligned icon misreads were not removed: \(cleaned.map(\.text))")
+        }
+        let genuine = make("O Ring", x: 138, y: 550, width: 100, height: 30, runs: [("O", 138), ("Ring", 165)])
+        guard ShotLensOCR.removeAlignedIconPrefixes(peers + [genuine]).last?.text == "O Ring" else {
+            throw Failure("A genuine aligned single-letter word must survive")
         }
         let duplicates = [
             make("Images", x: 138, y: 500, width: 102, height: 35, runs: []),

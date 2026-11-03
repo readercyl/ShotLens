@@ -144,7 +144,7 @@ struct ShotLensOCR {
     /// Only remove a one-character icon-like prefix when surrounding rows independently
     /// establish a shared text column. Without that evidence preserve the observation.
     static func removeAlignedIconPrefixes(_ blocks: [OCRBlockDTO]) -> [OCRBlockDTO] {
-        let pattern = #"^(?:(?:[•‹›≥&.,<>°/]+|LI|Ii|L|D)+)\s+"#
+        let pattern = #"^(?:(?:[•‹›≥&.,<>°/]+|LI|Ii|L|D|O)+)\s+"#
         let clean = blocks.filter { $0.text.range(of: pattern, options: .regularExpression) == nil }
         return blocks.map { block in
             guard let prefix = block.text.range(of: pattern, options: .regularExpression) else { return block }
