@@ -46,16 +46,28 @@ final class SecondaryButton: NSButton {
     static let horizontalPadding: CGFloat = 10
     static let buttonHeight: CGFloat = 26
 
+    /// 单个按钮可覆盖的高度与横向内边距（版本行胶囊用 24 / 12）。
+    var preferredHeight: CGFloat = SecondaryButton.buttonHeight
+    var preferredHorizontalPadding: CGFloat = SecondaryButton.horizontalPadding
+
     override var intrinsicContentSize: NSSize {
         let base = super.intrinsicContentSize
-        return NSSize(width: base.width + Self.horizontalPadding * 2, height: Self.buttonHeight)
+        return NSSize(
+            width: base.width + preferredHorizontalPadding * 2,
+            height: preferredHeight
+        )
     }
 }
 
 /// 版本行专用胶囊按键：与主模块的方角控件区分。
 func applyPillButtonStyle(_ button: NSButton) {
     applySecondaryButtonStyle(button)
-    button.layer?.cornerRadius = SecondaryButton.buttonHeight / 2
+    if let secondary = button as? SecondaryButton {
+        secondary.preferredHeight = 24
+        secondary.preferredHorizontalPadding = 12
+        secondary.invalidateIntrinsicContentSize()
+    }
+    button.layer?.cornerRadius = 12
     button.layer?.masksToBounds = true
 }
 
@@ -89,7 +101,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private var pipelineMessageDetailLabel: NSTextField?
     private var launchAtLoginSwitch: SettingsSwitchControl?
     private let checkUpdateButton = SecondaryButton()
-    private let installUpdateButton = SecondaryButton()
     private let toggleAPIButton = SecondaryButton()
     private var apiDetailsContainer: NSStackView?
     private var isApiDetailsExpanded = UserDefaults.standard.bool(forKey: MainWindowController.apiDetailsExpandedKey)
@@ -226,7 +237,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         root.addArrangedSubview(makeShortcutCard())
         root.addArrangedSubview(makeStartupCard())
         root.addArrangedSubview(makeAPICard())
-        root.addArrangedSubview(makeFooter())
 
         updateAPIExpandedState()
         updateWindowHeight(in: window, animated: false)
@@ -267,26 +277,18 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
         row.addArrangedSubview(label("版本 \(displayVersion)", font: .systemFont(ofSize: 13), color: .secondaryLabelColor))
 
+        let status = label("", font: .systemFont(ofSize: 13), color: .secondaryLabelColor)
+        status.lineBreakMode = .byTruncatingTail
+        updateStatusLabel = status
+        row.addArrangedSubview(status)
+
         setSecondaryButtonTitle(checkUpdateButton, "检测新版本")
         applyPillButtonStyle(checkUpdateButton)
         checkUpdateButton.toolTip = "检查新版本"
         checkUpdateButton.target = self
         checkUpdateButton.action = #selector(checkForUpdatesClicked)
         checkUpdateButton.translatesAutoresizingMaskIntoConstraints = false
-        checkUpdateButton.heightAnchor.constraint(equalToConstant: SecondaryButton.buttonHeight).isActive = true
         row.addArrangedSubview(checkUpdateButton)
-
-        let status = label("", font: .systemFont(ofSize: 13), color: .secondaryLabelColor)
-        status.lineBreakMode = .byTruncatingTail
-        updateStatusLabel = status
-        row.addArrangedSubview(status)
-
-        installUpdateButton.title = "升级"
-        applyPillButtonStyle(installUpdateButton)
-        installUpdateButton.target = self
-        installUpdateButton.action = #selector(installUpdateClicked)
-        installUpdateButton.isHidden = true
-        row.addArrangedSubview(installUpdateButton)
 
         return row
     }
@@ -467,24 +469,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         container.addArrangedSubview(title)
         container.addArrangedSubview(detail)
         return container
-    }
-
-    private func makeFooter() -> NSView {
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 10
-        row.widthAnchor.constraint(equalToConstant: SettingsStyle.cardWidth).isActive = true
-
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let startButton = SecondaryButton(title: "开始截图", target: self, action: #selector(startCaptureClicked))
-        applySecondaryButtonStyle(startButton)
-        startButton.keyEquivalent = "\r"
-
-        row.addArrangedSubview(spacer)
-        row.addArrangedSubview(startButton)
-        return row
     }
 
     private func makeCard(title: String, symbol: String) -> NSStackView {
@@ -892,6 +876,19 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     // MARK: - 更新检查
 
+    /// 版本行只保留一个动作按钮：无更新时检测，有更新时升级。
+    private func setVersionAction(installing: Bool) {
+        if installing {
+            setSecondaryButtonTitle(checkUpdateButton, "升级")
+            checkUpdateButton.target = self
+            checkUpdateButton.action = #selector(installUpdateClicked)
+        } else {
+            setSecondaryButtonTitle(checkUpdateButton, "检测新版本")
+            checkUpdateButton.target = self
+            checkUpdateButton.action = #selector(checkForUpdatesClicked)
+        }
+    }
+
     @objc private func checkForUpdatesClicked() {
         startUpdateCheck(showsProgress: true, automaticallyInstalls: false)
     }
@@ -899,7 +896,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private func startUpdateCheck(showsProgress: Bool, automaticallyInstalls: Bool) {
         updateTask?.cancel()
         availableUpdate = nil
-        installUpdateButton.isHidden = true
+        setVersionAction(installing: false)
         if showsProgress {
             checkUpdateButton.isEnabled = false
             setSecondaryButtonTitle(checkUpdateButton, "检测中…")
@@ -935,7 +932,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             availableUpdate = update
             updateStatusLabel?.stringValue = "发现 \(update.version)"
             updateStatusLabel?.textColor = .systemGreen
-            installUpdateButton.isHidden = false
+            setVersionAction(installing: true)
             if automaticallyInstalls, AppUpdater.canAutomaticallyInstall() {
                 beginInstalling(update)
             }
@@ -944,13 +941,13 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             availableUpdate = nil
             updateStatusLabel?.stringValue = "已是最新版"
             updateStatusLabel?.textColor = .secondaryLabelColor
-            installUpdateButton.isHidden = true
+            setVersionAction(installing: false)
         case .failed(let message):
             guard showsProgress else { return }
             availableUpdate = nil
             updateStatusLabel?.stringValue = message
             updateStatusLabel?.textColor = .systemOrange
-            installUpdateButton.isHidden = true
+            setVersionAction(installing: false)
         }
     }
 
@@ -983,7 +980,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     private func beginInstalling(_ update: AppUpdate) {
         checkUpdateButton.isEnabled = false
-        installUpdateButton.isEnabled = false
+        checkUpdateButton.isEnabled = false
         updateStatusLabel?.stringValue = "下载中…"
         updateStatusLabel?.textColor = .secondaryLabelColor
 
@@ -1013,7 +1010,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     private func showUpdateInstallFailure(reason: String) {
         checkUpdateButton.isEnabled = true
-        installUpdateButton.isEnabled = true
+        checkUpdateButton.isEnabled = true
         checkUpdateButton.title = "检测新版本"
         updateStatusLabel?.stringValue = "升级失败：\(reason)"
         updateStatusLabel?.textColor = .systemRed
