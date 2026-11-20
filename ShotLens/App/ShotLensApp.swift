@@ -6,6 +6,8 @@ import Carbon
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private static var retainedDelegate: AppDelegate?
+    nonisolated static let showsInDockKey = "ShotLens_ShowsInDock"
+
     private static let legacyDefaultsSuiteName = "com.qingcheng.shotlens"
     private static let legacyDefaultsMigrationKey = "ShotLens_DidMigrateLegacyDefaults"
 
@@ -51,7 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppDelegate.shared = self
         ProcessInfo.processInfo.disableAutomaticTermination("ShotLens stays active for menu bar capture")
-        NSApp.setActivationPolicy(.regular)
+        let showsInDock = UserDefaults.standard.object(forKey: Self.showsInDockKey) as? Bool ?? true
+        NSApp.setActivationPolicy(showsInDock ? .regular : .accessory)
         setupMainMenu()
         setupMenuBar()
         installHotKeyHandler()

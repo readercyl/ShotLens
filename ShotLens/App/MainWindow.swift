@@ -251,19 +251,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     private func makeStartupCard() -> NSView {
         let card = makeCard()
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 12
-
-        let textStack = NSStackView()
-        textStack.orientation = .vertical
-        textStack.alignment = .leading
-        textStack.spacing = 0
-        textStack.addArrangedSubview(label("开机自动启动", font: .systemFont(ofSize: 14, weight: .medium)))
-
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         let launchSwitch = BlueSwitchControl(frame: NSRect(x: 0, y: 0, width: 46, height: 26))
         launchSwitch.isOn = launchAtLoginEnabled
@@ -271,17 +258,44 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             self?.launchAtLoginChanged()
         }
         launchAtLoginSwitch = launchSwitch
+        card.addArrangedSubview(makeSwitchRow("开机自动启动", control: launchSwitch))
+
+        let dockSwitch = BlueSwitchControl(frame: NSRect(x: 0, y: 0, width: 46, height: 26))
+        dockSwitch.isOn = NSApp.activationPolicy() == .regular
+        dockSwitch.onChange = { [weak self, weak dockSwitch] in
+            guard let dockSwitch else { return }
+            let showsInDock = dockSwitch.isOn
+            guard NSApp.setActivationPolicy(showsInDock ? .regular : .accessory) else {
+                dockSwitch.isOn = NSApp.activationPolicy() == .regular
+                self?.showPipelineMessage("无法更改 Dock 显示", detail: "请稍后再试。")
+                return
+            }
+            UserDefaults.standard.set(showsInDock, forKey: AppDelegate.showsInDockKey)
+        }
+        card.addArrangedSubview(makeSwitchRow("在 Dock 中显示", control: dockSwitch))
+        return card
+    }
+
+    private func makeSwitchRow(_ title: String, control: BlueSwitchControl) -> NSView {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 12
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let rightControl = makeRightControlContainer(width: 180)
         let rightSpacer = NSView()
         rightSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         rightControl.addArrangedSubview(rightSpacer)
-        rightControl.addArrangedSubview(launchSwitch)
+        rightControl.addArrangedSubview(control)
 
-        row.addArrangedSubview(textStack)
+        control.toolTip = title
+        control.setAccessibilityLabel(title)
+        row.addArrangedSubview(label(title, font: .systemFont(ofSize: 14, weight: .medium)))
         row.addArrangedSubview(spacer)
         row.addArrangedSubview(rightControl)
-        card.addArrangedSubview(row)
-        return card
+        return row
     }
 
     private func makeShortcutCard() -> NSView {
@@ -623,7 +637,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     private func updateWindowHeight(animated: Bool) {
         guard let window else { return }
-        let baseHeight: CGFloat = isApiDetailsExpanded ? 526 : 404
+        let baseHeight: CGFloat = isApiDetailsExpanded ? 560 : 438
         let pipelineHeight: CGFloat = pipelineMessageContainer?.isHidden == false ? 62 : 0
         let apiDetailHeight: CGFloat = apiStatusDetailLabel?.isHidden == false ? 30 : 0
         let targetHeight = baseHeight + pipelineHeight + apiDetailHeight
@@ -1233,7 +1247,6 @@ private final class BlueSwitchControl: NSControl {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        toolTip = "开机自动启动"
         setContentHuggingPriority(.required, for: .horizontal)
         setContentHuggingPriority(.required, for: .vertical)
     }
