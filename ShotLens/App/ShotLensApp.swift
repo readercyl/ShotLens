@@ -181,7 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(
-            title: "打开控制台",
+            title: "设置",
             action: #selector(openPreferencesMenuItem),
             keyEquivalent: ","
         ))

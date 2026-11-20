@@ -111,7 +111,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "\(applicationDisplayName) 控制台"
+        window.title = "\(applicationDisplayName) 设置"
         window.isReleasedWhenClosed = false
         window.animationBehavior = .none
 
