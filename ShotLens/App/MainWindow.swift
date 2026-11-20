@@ -1044,8 +1044,8 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     private func showUpdateInstallFailure(reason: String) {
         checkUpdateButton.isEnabled = true
-        checkUpdateButton.isEnabled = true
-        checkUpdateButton.title = "检测新版本"
+        // 动作也要复原，否则按钮写着「检测新版本」却会再次触发安装。
+        setVersionAction(installing: false)
         updateStatusLabel?.stringValue = "升级失败：\(reason)"
         updateStatusLabel?.textColor = .systemRed
         ShotLensLogger.event("update_install_failed", level: .error, stage: "update", outcome: "failed")
