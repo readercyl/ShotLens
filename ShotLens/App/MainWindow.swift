@@ -35,7 +35,24 @@ private enum SettingsStyle {
     static var cardContentWidth: CGFloat { cardWidth - 2 * cardPadding }
 }
 
-/// 次级按钮统一外观：白底、0.5 pt 描边、6 pt 圆角、12 pt 中等字重。
+/// 改标题后让按钮重新按文字宽度布局。
+func setSecondaryButtonTitle(_ button: NSButton, _ title: String) {
+    button.title = title
+    button.invalidateIntrinsicContentSize()
+}
+
+/// 次级按钮：白底细描边按钮，宽度跟随标题（左右各 10 pt 内边距），高 22 pt。
+final class SecondaryButton: NSButton {
+    static let horizontalPadding: CGFloat = 10
+    static let buttonHeight: CGFloat = 22
+
+    override var intrinsicContentSize: NSSize {
+        let base = super.intrinsicContentSize
+        return NSSize(width: base.width + Self.horizontalPadding * 2, height: Self.buttonHeight)
+    }
+}
+
+/// 次级按钮统一外观：白底、0.5 pt 描边、6 pt 圆角、13 pt 中等字重。
 func applySecondaryButtonStyle(_ button: NSButton) {
     button.isBordered = false
     button.wantsLayer = true
@@ -43,7 +60,7 @@ func applySecondaryButtonStyle(_ button: NSButton) {
     button.layer?.cornerRadius = 6
     button.layer?.borderWidth = 0.5
     button.layer?.borderColor = NSColor.black.withAlphaComponent(0.10).cgColor
-    button.font = .systemFont(ofSize: 12, weight: .medium)
+    button.font = .systemFont(ofSize: 13, weight: .medium)
     button.contentTintColor = .labelColor
 }
 
@@ -64,9 +81,9 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private var pipelineMessageTitleLabel: NSTextField?
     private var pipelineMessageDetailLabel: NSTextField?
     private var launchAtLoginSwitch: SettingsSwitchControl?
-    private let checkUpdateButton = NSButton()
-    private let installUpdateButton = NSButton()
-    private let toggleAPIButton = NSButton()
+    private let checkUpdateButton = SecondaryButton()
+    private let installUpdateButton = SecondaryButton()
+    private let toggleAPIButton = SecondaryButton()
     private var apiDetailsContainer: NSStackView?
     private var isApiDetailsExpanded = UserDefaults.standard.bool(forKey: MainWindowController.apiDetailsExpandedKey)
     private let apiEndpointField = NSTextField()
@@ -243,17 +260,16 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
         row.addArrangedSubview(label("版本 \(displayVersion)", font: .systemFont(ofSize: 13), color: .secondaryLabelColor))
 
-        checkUpdateButton.title = "检测新版本"
+        setSecondaryButtonTitle(checkUpdateButton, "检测新版本")
         applySecondaryButtonStyle(checkUpdateButton)
         checkUpdateButton.toolTip = "检查新版本"
         checkUpdateButton.target = self
         checkUpdateButton.action = #selector(checkForUpdatesClicked)
         checkUpdateButton.translatesAutoresizingMaskIntoConstraints = false
-        checkUpdateButton.widthAnchor.constraint(equalToConstant: 88).isActive = true
         checkUpdateButton.heightAnchor.constraint(equalToConstant: 22).isActive = true
         row.addArrangedSubview(checkUpdateButton)
 
-        let status = label("", font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
+        let status = label("", font: .systemFont(ofSize: 13), color: .secondaryLabelColor)
         status.lineBreakMode = .byTruncatingTail
         updateStatusLabel = status
         row.addArrangedSubview(status)
@@ -263,7 +279,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         installUpdateButton.target = self
         installUpdateButton.action = #selector(installUpdateClicked)
         installUpdateButton.isHidden = true
-        installUpdateButton.widthAnchor.constraint(equalToConstant: 58).isActive = true
         row.addArrangedSubview(installUpdateButton)
 
         return row
@@ -271,12 +286,11 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     private func makePermissionCard() -> NSView {
         let card = makeCard(title: "权限", symbol: "lock.shield")
-        let status = label("", font: .systemFont(ofSize: 13, weight: .semibold))
+        let status = label("", font: .systemFont(ofSize: 13, weight: .medium))
         permissionStatusLabel = status
 
-        let button = NSButton(title: "打开设置", target: self, action: #selector(openPermissionsClicked))
+        let button = SecondaryButton(title: "打开设置", target: self, action: #selector(openPermissionsClicked))
         applySecondaryButtonStyle(button)
-        button.widthAnchor.constraint(equalToConstant: 96).isActive = true
 
         let rightControl = makeRightControlContainer(width: SettingsStyle.controlWidth)
         let rightSpacer = NSView()
@@ -366,17 +380,16 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         headerRow.addArrangedSubview(spacer)
-        let status = label("", font: .systemFont(ofSize: 12, weight: .semibold), color: .secondaryLabelColor)
+        let status = label("", font: .systemFont(ofSize: 13, weight: .medium), color: .secondaryLabelColor)
         apiStatusLabel = status
         headerRow.addArrangedSubview(status)
         applySecondaryButtonStyle(toggleAPIButton)
         toggleAPIButton.target = self
         toggleAPIButton.action = #selector(toggleAPIExpandedClicked)
-        toggleAPIButton.widthAnchor.constraint(equalToConstant: 64).isActive = true
         headerRow.addArrangedSubview(toggleAPIButton)
         let card = makeCard(header: headerRow)
 
-        let statusDetail = label("", font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
+        let statusDetail = label("", font: .systemFont(ofSize: 13), color: .secondaryLabelColor)
         statusDetail.lineBreakMode = .byWordWrapping
         statusDetail.maximumNumberOfLines = 2
         statusDetail.preferredMaxLayoutWidth = SettingsStyle.cardContentWidth
@@ -403,12 +416,10 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         actionRow.widthAnchor.constraint(equalToConstant: SettingsStyle.cardContentWidth).isActive = true
         let actionSpacer = NSView()
         actionSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let clearButton = NSButton(title: "清空", target: self, action: #selector(clearAPISettingsClicked))
+        let clearButton = SecondaryButton(title: "清空", target: self, action: #selector(clearAPISettingsClicked))
         applySecondaryButtonStyle(clearButton)
-        clearButton.widthAnchor.constraint(equalToConstant: 58).isActive = true
-        let testButton = NSButton(title: "测试", target: self, action: #selector(testConnectionClicked))
+        let testButton = SecondaryButton(title: "测试", target: self, action: #selector(testConnectionClicked))
         applySecondaryButtonStyle(testButton)
-        testButton.widthAnchor.constraint(equalToConstant: 58).isActive = true
         actionRow.addArrangedSubview(actionSpacer)
         actionRow.addArrangedSubview(clearButton)
         actionRow.addArrangedSubview(testButton)
@@ -436,7 +447,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         container.layer?.borderColor = NSColor.systemRed.withAlphaComponent(0.28).cgColor
 
         let title = label("", font: .systemFont(ofSize: 13, weight: .semibold), color: .labelColor)
-        let detail = label("", font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
+        let detail = label("", font: .systemFont(ofSize: 13), color: .secondaryLabelColor)
         detail.lineBreakMode = .byWordWrapping
         detail.maximumNumberOfLines = 2
         detail.preferredMaxLayoutWidth = 374
@@ -458,10 +469,9 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let startButton = NSButton(title: "开始截图", target: self, action: #selector(startCaptureClicked))
+        let startButton = SecondaryButton(title: "开始截图", target: self, action: #selector(startCaptureClicked))
         applySecondaryButtonStyle(startButton)
         startButton.keyEquivalent = "\r"
-        startButton.widthAnchor.constraint(equalToConstant: 116).isActive = true
 
         row.addArrangedSubview(spacer)
         row.addArrangedSubview(startButton)
@@ -684,7 +694,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     private func updateAPIExpandedState() {
         apiDetailsContainer?.isHidden = !isApiDetailsExpanded
-        toggleAPIButton.title = isApiDetailsExpanded ? "收起" : "展开"
+        setSecondaryButtonTitle(toggleAPIButton, isApiDetailsExpanded ? "收起" : "展开")
     }
 
     private func updateWindowHeight(in newWindow: NSWindow? = nil, animated: Bool) {
@@ -883,7 +893,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         installUpdateButton.isHidden = true
         if showsProgress {
             checkUpdateButton.isEnabled = false
-            checkUpdateButton.title = "检测中…"
+            setSecondaryButtonTitle(checkUpdateButton, "检测中…")
             updateStatusLabel?.stringValue = "检查中…"
             updateStatusLabel?.textColor = .secondaryLabelColor
         }
@@ -909,7 +919,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         updateTask = nil
         if showsProgress {
             checkUpdateButton.isEnabled = true
-            checkUpdateButton.title = "检测新版本"
+            setSecondaryButtonTitle(checkUpdateButton, "检测新版本")
         }
         switch result {
         case .available(let update):
