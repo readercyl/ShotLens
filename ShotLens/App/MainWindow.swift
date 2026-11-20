@@ -342,8 +342,33 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         card.addArrangedSubview(makeSwitchRow("在菜单栏显示", control: menuBarSwitch))
         card.addArrangedSubview(makeSwitchRow("在 Dock 中显示", control: dockSwitch))
         card.addArrangedSubview(label("重新启动后生效", font: .systemFont(ofSize: 11), color: .secondaryLabelColor))
-        card.addArrangedSubview(makeSwitchRow("开机自动启动", control: launchSwitch))
+        if isDevelopmentBuild {
+            card.addArrangedSubview(makeSettingsRow("开机自动启动", control: makeManagedValueBlock("由正式版管理")))
+        } else {
+            card.addArrangedSubview(makeSwitchRow("开机自动启动", control: launchSwitch))
+        }
         return card
+    }
+
+    /// 只读值块：白底、0.5 pt 描边、13 pt 中等字重、宽 180、高 26。
+    private func makeManagedValueBlock(_ text: String) -> NSView {
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.white.cgColor
+        container.layer?.cornerRadius = 6
+        container.layer?.borderWidth = 0.5
+        container.layer?.borderColor = NSColor.black.withAlphaComponent(0.10).cgColor
+        let value = label(text, font: .systemFont(ofSize: 13, weight: .medium), color: .secondaryLabelColor)
+        value.alignment = .center
+        value.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(value)
+        NSLayoutConstraint.activate([
+            container.widthAnchor.constraint(equalToConstant: SettingsStyle.controlWidth),
+            container.heightAnchor.constraint(equalToConstant: 26),
+            value.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            value.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+        ])
+        return container
     }
 
     private func makeSwitchRow(_ title: String, control: SettingsSwitchControl) -> NSView {
@@ -717,6 +742,11 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         return "v\(normalized)"
     }
 
+    /// 开发版不注册开机启动，避免覆盖正式版的登录项；与 MonoList 口径一致。
+    private var isDevelopmentBuild: Bool {
+        Bundle.main.bundleIdentifier == "com.qingcheng.shotlens.mac.development"
+    }
+
     private var launchAtLoginEnabled: Bool {
         SMAppService.mainApp.status == .enabled
     }
@@ -823,6 +853,10 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     }
 
     @objc private func launchAtLoginChanged() {
+        guard !isDevelopmentBuild else {
+            launchAtLoginSwitch?.isOn = launchAtLoginEnabled
+            return
+        }
         let shouldEnable = launchAtLoginSwitch?.isOn == true
         do {
             if shouldEnable {
