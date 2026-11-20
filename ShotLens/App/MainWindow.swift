@@ -2,6 +2,39 @@ import AppKit
 import CoreGraphics
 import ServiceManagement
 
+private enum SettingsStyle {
+    static let pagePadding: CGFloat = 16
+    static let cardSpacing: CGFloat = 12
+    static let cardPadding: CGFloat = 14
+    static let cardCornerRadius: CGFloat = 11
+    static let cardOpacity = 0.035
+    static let headingSize: CGFloat = 12
+    static let headingIconSpacing: CGFloat = 5
+    static let headingContentSpacing: CGFloat = 10
+    static let rowSpacing: CGFloat = 8
+    static let rowHeight: CGFloat = 34
+    static let rowLabelSize: CGFloat = 14
+    static let rowControlSpacing: CGFloat = 12
+    static let controlWidth: CGFloat = 180
+    static let switchWidth: CGFloat = 54
+    static let switchHeight: CGFloat = 28
+    static let switchThumbSize: CGFloat = 24
+    static let switchThumbInset: CGFloat = 3
+    static let switchOffOpacity = 0.16
+    static let switchThumbShadowOpacity = 0.18
+    static let switchThumbShadowRadius: CGFloat = 1.5
+    static let switchThumbShadowOffset: CGFloat = 1
+
+    static var switchThumbOffset: CGFloat {
+        (switchWidth - switchThumbSize) / 2 - switchThumbInset
+    }
+
+    static let windowWidth: CGFloat = 430
+    static let bottomPadding: CGFloat = 18
+    static var cardWidth: CGFloat { windowWidth - 2 * pagePadding }
+    static var cardContentWidth: CGFloat { cardWidth - 2 * cardPadding }
+}
+
 final class MainWindowController: NSObject, NSTextFieldDelegate {
     private var applicationDisplayName: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "ShotLens"
@@ -18,7 +51,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private var pipelineMessageContainer: NSStackView?
     private var pipelineMessageTitleLabel: NSTextField?
     private var pipelineMessageDetailLabel: NSTextField?
-    private var launchAtLoginSwitch: BlueSwitchControl?
+    private var launchAtLoginSwitch: SettingsSwitchControl?
     private let checkUpdateButton = NSButton()
     private let installUpdateButton = NSButton()
     private let toggleAPIButton = NSButton()
@@ -108,7 +141,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     private func makeWindow() -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 430, height: 442),
+            contentRect: NSRect(x: 0, y: 0, width: SettingsStyle.windowWidth, height: 442),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -130,15 +163,15 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         root.orientation = .vertical
         root.alignment = .leading
         root.distribution = .fill
-        root.spacing = 12
+        root.spacing = SettingsStyle.cardSpacing
         root.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(root)
         settingsStack = root
         settingsDocument = document
 
         NSLayoutConstraint.activate([
-            root.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 16),
-            root.topAnchor.constraint(equalTo: document.topAnchor, constant: 16)
+            root.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: SettingsStyle.pagePadding),
+            root.topAnchor.constraint(equalTo: document.topAnchor, constant: SettingsStyle.pagePadding)
         ])
 
         root.addArrangedSubview(makeHeader())
@@ -163,7 +196,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 12
-        row.widthAnchor.constraint(equalToConstant: 398).isActive = true
+        row.widthAnchor.constraint(equalToConstant: SettingsStyle.cardWidth).isActive = true
 
         let icon = ShotLensGlyphIconView(frame: NSRect(x: 0, y: 0, width: 58, height: 58))
         icon.widthAnchor.constraint(equalToConstant: 58).isActive = true
@@ -227,7 +260,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         button.bezelStyle = .rounded
         button.widthAnchor.constraint(equalToConstant: 96).isActive = true
 
-        let rightControl = makeRightControlContainer(width: 180)
+        let rightControl = makeRightControlContainer(width: SettingsStyle.controlWidth)
         let rightSpacer = NSView()
         rightSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         rightControl.addArrangedSubview(rightSpacer)
@@ -241,14 +274,14 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private func makeStartupCard() -> NSView {
         let card = makeCard(title: "启动", symbol: "power")
 
-        let launchSwitch = BlueSwitchControl(frame: NSRect(x: 0, y: 0, width: 54, height: 28))
+        let launchSwitch = SettingsSwitchControl(frame: .zero)
         launchSwitch.isOn = launchAtLoginEnabled
         launchSwitch.onChange = { [weak self] in
             self?.launchAtLoginChanged()
         }
         launchAtLoginSwitch = launchSwitch
 
-        let dockSwitch = BlueSwitchControl(frame: NSRect(x: 0, y: 0, width: 54, height: 28))
+        let dockSwitch = SettingsSwitchControl(frame: .zero)
         dockSwitch.isOn = NSApp.activationPolicy() == .regular
         dockSwitch.onChange = { [weak self, weak dockSwitch] in
             guard let dockSwitch else { return }
@@ -265,7 +298,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         return card
     }
 
-    private func makeSwitchRow(_ title: String, control: BlueSwitchControl) -> NSView {
+    private func makeSwitchRow(_ title: String, control: SettingsSwitchControl) -> NSView {
         control.toolTip = title
         control.setAccessibilityLabel(title)
         return makeSettingsRow(title, control: control)
@@ -275,13 +308,14 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         let row = NSStackView()
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.spacing = 12
-        row.widthAnchor.constraint(equalToConstant: 370).isActive = true
-        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 34).isActive = true
+        row.spacing = 0
+        row.widthAnchor.constraint(equalToConstant: SettingsStyle.cardContentWidth).isActive = true
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: SettingsStyle.rowHeight).isActive = true
 
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        row.addArrangedSubview(label(title, font: .systemFont(ofSize: 14, weight: .medium)))
+        spacer.widthAnchor.constraint(greaterThanOrEqualToConstant: SettingsStyle.rowControlSpacing).isActive = true
+        row.addArrangedSubview(label(title, font: .systemFont(ofSize: SettingsStyle.rowLabelSize, weight: .medium)))
         row.addArrangedSubview(spacer)
         row.addArrangedSubview(control)
         return row
@@ -289,20 +323,19 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     private func makeShortcutCard() -> NSView {
         let card = makeCard(title: "快捷键", symbol: "keyboard")
-        let recorder = ShortcutRecorder(frame: NSRect(x: 0, y: 0, width: 180, height: 32))
-        recorder.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        let recorder = ShortcutRecorder(frame: NSRect(x: 0, y: 0, width: SettingsStyle.controlWidth, height: 32))
+        recorder.widthAnchor.constraint(equalToConstant: SettingsStyle.controlWidth).isActive = true
         recorder.heightAnchor.constraint(equalToConstant: 32).isActive = true
         card.addArrangedSubview(makeSettingsRow("截图翻译", control: recorder))
         return card
     }
 
     private func makeAPICard() -> NSView {
-        let card = makeCard()
         let headerRow = NSStackView()
         headerRow.orientation = .horizontal
         headerRow.alignment = .centerY
         headerRow.spacing = 10
-        headerRow.widthAnchor.constraint(equalToConstant: 370).isActive = true
+        headerRow.widthAnchor.constraint(equalToConstant: SettingsStyle.cardContentWidth).isActive = true
 
         headerRow.addArrangedSubview(makeSectionHeading("API 信息", symbol: "network"))
         let spacer = NSView()
@@ -316,14 +349,13 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         toggleAPIButton.action = #selector(toggleAPIExpandedClicked)
         toggleAPIButton.widthAnchor.constraint(equalToConstant: 64).isActive = true
         headerRow.addArrangedSubview(toggleAPIButton)
-        card.addArrangedSubview(headerRow)
-        card.setCustomSpacing(10, after: headerRow)
+        let card = makeCard(header: headerRow)
 
         let statusDetail = label("", font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
         statusDetail.lineBreakMode = .byWordWrapping
         statusDetail.maximumNumberOfLines = 2
-        statusDetail.preferredMaxLayoutWidth = 370
-        statusDetail.widthAnchor.constraint(equalToConstant: 370).isActive = true
+        statusDetail.preferredMaxLayoutWidth = SettingsStyle.cardContentWidth
+        statusDetail.widthAnchor.constraint(equalToConstant: SettingsStyle.cardContentWidth).isActive = true
         statusDetail.isHidden = true
         apiStatusDetailLabel = statusDetail
         card.addArrangedSubview(statusDetail)
@@ -335,15 +367,15 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         details.orientation = .vertical
         details.alignment = .leading
         details.distribution = .fill
-        details.spacing = 8
-        details.widthAnchor.constraint(equalToConstant: 370).isActive = true
+        details.spacing = SettingsStyle.rowSpacing
+        details.widthAnchor.constraint(equalToConstant: SettingsStyle.cardContentWidth).isActive = true
         apiDetailsContainer = details
 
         let actionRow = NSStackView()
         actionRow.orientation = .horizontal
         actionRow.alignment = .centerY
         actionRow.spacing = 8
-        actionRow.widthAnchor.constraint(equalToConstant: 370).isActive = true
+        actionRow.widthAnchor.constraint(equalToConstant: SettingsStyle.cardContentWidth).isActive = true
         let actionSpacer = NSView()
         actionSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let clearButton = NSButton(title: "清空", target: self, action: #selector(clearAPISettingsClicked))
@@ -370,7 +402,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         container.orientation = .vertical
         container.alignment = .leading
         container.distribution = .fill
-        container.widthAnchor.constraint(equalToConstant: 398).isActive = true
+        container.widthAnchor.constraint(equalToConstant: SettingsStyle.cardWidth).isActive = true
         container.wantsLayer = true
         container.layer?.cornerRadius = 11
         container.spacing = 3
@@ -397,7 +429,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 10
-        row.widthAnchor.constraint(equalToConstant: 398).isActive = true
+        row.widthAnchor.constraint(equalToConstant: SettingsStyle.cardWidth).isActive = true
 
         let hint = label("设置会自动保存", font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
         let spacer = NSView()
@@ -413,37 +445,39 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         return row
     }
 
-    private func makeCard(title: String? = nil, symbol: String = "") -> NSStackView {
+    private func makeCard(title: String, symbol: String) -> NSStackView {
+        makeCard(header: makeSectionHeading(title, symbol: symbol))
+    }
+
+    private func makeCard(header: NSView) -> NSStackView {
         let card = SettingsCardStackView()
         card.orientation = .vertical
         card.alignment = .leading
         card.distribution = .fill
-        card.spacing = 8
-        card.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
+        card.spacing = SettingsStyle.rowSpacing
+        let padding = SettingsStyle.cardPadding
+        card.edgeInsets = NSEdgeInsets(top: padding, left: padding, bottom: padding, right: padding)
         card.wantsLayer = true
         card.updateBackground()
-        card.layer?.cornerRadius = 11
-        card.widthAnchor.constraint(equalToConstant: 398).isActive = true
-        if let title {
-            let heading = makeSectionHeading(title, symbol: symbol)
-            card.addArrangedSubview(heading)
-            card.setCustomSpacing(10, after: heading)
-        }
+        card.layer?.cornerRadius = SettingsStyle.cardCornerRadius
+        card.widthAnchor.constraint(equalToConstant: SettingsStyle.cardWidth).isActive = true
+        card.addArrangedSubview(header)
+        card.setCustomSpacing(SettingsStyle.headingContentSpacing, after: header)
         return card
     }
 
     private func makeSectionHeading(_ title: String, symbol: String) -> NSView {
         let icon = NSImageView()
         icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 12, weight: .semibold))
+            .withSymbolConfiguration(.init(pointSize: SettingsStyle.headingSize, weight: .semibold))
         icon.contentTintColor = .secondaryLabelColor
 
         let heading = NSStackView(views: [
-            icon, label(title, font: .systemFont(ofSize: 12, weight: .semibold), color: .secondaryLabelColor)
+            icon, label(title, font: .systemFont(ofSize: SettingsStyle.headingSize, weight: .semibold), color: .secondaryLabelColor)
         ])
         heading.orientation = .horizontal
         heading.alignment = .centerY
-        heading.spacing = 5
+        heading.spacing = SettingsStyle.headingIconSpacing
         return heading
     }
 
@@ -469,7 +503,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 10
-        row.widthAnchor.constraint(equalToConstant: 370).isActive = true
+        row.widthAnchor.constraint(equalToConstant: SettingsStyle.cardContentWidth).isActive = true
 
         let titleLabel = label("Key", font: .systemFont(ofSize: 13), color: .secondaryLabelColor)
         titleLabel.widthAnchor.constraint(equalToConstant: 38).isActive = true
@@ -558,7 +592,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 10
-        row.widthAnchor.constraint(equalToConstant: 370).isActive = true
+        row.widthAnchor.constraint(equalToConstant: SettingsStyle.cardContentWidth).isActive = true
 
         let titleLabel = label("模型", font: .systemFont(ofSize: 13), color: .secondaryLabelColor)
         titleLabel.widthAnchor.constraint(equalToConstant: 38).isActive = true
@@ -607,7 +641,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 10
-        row.widthAnchor.constraint(equalToConstant: 370).isActive = true
+        row.widthAnchor.constraint(equalToConstant: SettingsStyle.cardContentWidth).isActive = true
 
         let titleLabel = label(title, font: .systemFont(ofSize: 13), color: .secondaryLabelColor)
         titleLabel.widthAnchor.constraint(equalToConstant: 38).isActive = true
@@ -633,10 +667,10 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private func updateWindowHeight(in newWindow: NSWindow? = nil, animated: Bool) {
         guard let window = newWindow ?? window, let settingsStack, let settingsDocument else { return }
         settingsStack.layoutSubtreeIfNeeded()
-        let contentHeight = ceil(settingsStack.fittingSize.height) + 34
-        settingsDocument.setFrameSize(NSSize(width: 430, height: contentHeight))
+        let contentHeight = ceil(settingsStack.fittingSize.height) + SettingsStyle.pagePadding + SettingsStyle.bottomPadding
+        settingsDocument.setFrameSize(NSSize(width: SettingsStyle.windowWidth, height: contentHeight))
         let screenFrame = (window.screen ?? NSScreen.main)?.visibleFrame
-        let idealHeight = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: 430, height: contentHeight)).height
+        let idealHeight = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: SettingsStyle.windowWidth, height: contentHeight)).height
         let targetHeight = min(idealHeight, screenFrame.map { $0.height - 24 } ?? idealHeight)
         var frame = window.frame
         guard abs(frame.height - targetHeight) > 0.5 else { return }
@@ -1243,7 +1277,7 @@ private final class SettingsCardStackView: NSStackView {
     func updateBackground() {
         let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
         let tint: NSColor = isDark ? .white : .black
-        layer?.backgroundColor = tint.withAlphaComponent(0.035).cgColor
+        layer?.backgroundColor = tint.withAlphaComponent(SettingsStyle.cardOpacity).cgColor
     }
 }
 
@@ -1251,7 +1285,7 @@ private final class SettingsDocumentView: NSView {
     override var isFlipped: Bool { true }
 }
 
-private final class BlueSwitchControl: NSControl {
+private final class SettingsSwitchControl: NSControl {
     var onChange: (() -> Void)?
 
     var isOn = false {
@@ -1259,7 +1293,7 @@ private final class BlueSwitchControl: NSControl {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: 54, height: 28)
+        NSSize(width: SettingsStyle.switchWidth, height: SettingsStyle.switchHeight)
     }
 
     override init(frame frameRect: NSRect) {
@@ -1280,15 +1314,27 @@ private final class BlueSwitchControl: NSControl {
         let trackRect = bounds
         let trackColor = isOn
             ? NSColor.controlAccentColor
-            : NSColor.labelColor.withAlphaComponent(0.16)
+            : NSColor.labelColor.withAlphaComponent(SettingsStyle.switchOffOpacity)
         trackColor.setFill()
         NSBezierPath(roundedRect: trackRect, xRadius: trackRect.height / 2, yRadius: trackRect.height / 2).fill()
 
-        let knobSize: CGFloat = 24
-        let knobX = isOn ? bounds.maxX - knobSize - 3 : bounds.minX + 3
-        let knobRect = CGRect(x: knobX, y: bounds.midY - knobSize / 2, width: knobSize, height: knobSize)
+        let thumbSize = SettingsStyle.switchThumbSize
+        let offset = isOn ? SettingsStyle.switchThumbOffset : -SettingsStyle.switchThumbOffset
+        let thumbRect = NSRect(
+            x: bounds.midX + offset - thumbSize / 2,
+            y: bounds.midY - thumbSize / 2,
+            width: thumbSize,
+            height: thumbSize
+        )
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(SettingsStyle.switchThumbShadowOpacity)
+        shadow.shadowBlurRadius = SettingsStyle.switchThumbShadowRadius
+        shadow.shadowOffset = NSSize(width: 0, height: -SettingsStyle.switchThumbShadowOffset)
+        shadow.set()
         NSColor.white.setFill()
-        NSBezierPath(ovalIn: knobRect).fill()
+        NSBezierPath(ovalIn: thumbRect).fill()
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     override func mouseDown(with event: NSEvent) {
