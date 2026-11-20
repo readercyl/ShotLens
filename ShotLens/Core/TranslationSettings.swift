@@ -192,8 +192,6 @@ struct TranslationSettings: Equatable {
     @discardableResult
     func save() -> Bool {
         let defaults = UserDefaults.standard
-        defaults.set(apiEndpoint.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Self.apiEndpointKey)
-        defaults.set(model.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Self.modelKey)
         do {
             let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
             if key.isEmpty {
@@ -201,12 +199,13 @@ struct TranslationSettings: Equatable {
             } else {
                 try Self.secretStore.save(key)
             }
-            defaults.removeObject(forKey: Self.apiKeyKey)
         } catch {
             ShotLensLogger.event("api_key_save_failed", level: .error, stage: "settings", outcome: "failed", error: error)
-            defaults.synchronize()
             return false
         }
+        defaults.set(apiEndpoint.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Self.apiEndpointKey)
+        defaults.set(model.trimmingCharacters(in: .whitespacesAndNewlines), forKey: Self.modelKey)
+        defaults.removeObject(forKey: Self.apiKeyKey)
         defaults.synchronize()
         NotificationCenter.default.post(name: Self.didChangeNotification, object: nil)
         return true
@@ -214,38 +213,36 @@ struct TranslationSettings: Equatable {
 
     @discardableResult
     static func resetSavedConfiguration() -> Bool {
+        do {
+            try secretStore.clear()
+        } catch {
+            ShotLensLogger.event("api_key_clear_failed", level: .error, stage: "settings", outcome: "failed", error: error)
+            return false
+        }
         let defaults = UserDefaults.standard
         defaults.removeObject(forKey: apiEndpointKey)
         defaults.removeObject(forKey: apiKeyKey)
         defaults.removeObject(forKey: modelKey)
-        var clearedSecret = true
-        do {
-            try secretStore.clear()
-        } catch {
-            clearedSecret = false
-            ShotLensLogger.event("api_key_clear_failed", level: .error, stage: "settings", outcome: "failed", error: error)
-        }
         defaults.synchronize()
         NotificationCenter.default.post(name: didChangeNotification, object: nil)
-        return clearedSecret
+        return true
     }
 
     @discardableResult
     static func clearSavedConfiguration() -> Bool {
+        do {
+            try secretStore.clear()
+        } catch {
+            ShotLensLogger.event("api_key_clear_failed", level: .error, stage: "settings", outcome: "failed", error: error)
+            return false
+        }
         let defaults = UserDefaults.standard
         defaults.set("", forKey: apiEndpointKey)
         defaults.removeObject(forKey: apiKeyKey)
         defaults.set("", forKey: modelKey)
-        var clearedSecret = true
-        do {
-            try secretStore.clear()
-        } catch {
-            clearedSecret = false
-            ShotLensLogger.event("api_key_clear_failed", level: .error, stage: "settings", outcome: "failed", error: error)
-        }
         defaults.synchronize()
         NotificationCenter.default.post(name: didChangeNotification, object: nil)
-        return clearedSecret
+        return true
     }
 
     private var normalizedEndpointString: String {

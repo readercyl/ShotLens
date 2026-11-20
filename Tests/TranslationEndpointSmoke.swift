@@ -2,8 +2,28 @@ import Foundation
 
 @main
 struct TranslationEndpointSmoke {
+    private static func assertFailedSecretWritePreservesConfiguration() throws {
+        let store = InMemoryTranslationSecretStore()
+        TranslationSettings.installSecretStoreForTesting(store)
+        defer {
+            store.rejectWrites = false
+            TranslationSettings.resetSavedConfiguration()
+        }
+        let original = TranslationSettings(apiEndpoint: "https://old.example/v1", apiKey: "old-key", model: "old-model")
+        let replacement = TranslationSettings(apiEndpoint: "https://new.example/v1", apiKey: "new-key", model: "new-model")
+        guard original.save() else { throw TestFailure("Could not prepare saved configuration") }
+
+        store.rejectWrites = true
+        guard !replacement.save(), TranslationSettings.load() == original,
+              !TranslationSettings.clearSavedConfiguration(), TranslationSettings.load() == original,
+              !TranslationSettings.resetSavedConfiguration(), TranslationSettings.load() == original else {
+            throw TestFailure("A failed credential write or deletion must preserve the entire saved configuration")
+        }
+    }
+
     static func main() async throws {
         TranslationSettings.installSecretStoreForTesting(InMemoryTranslationSecretStore())
+        try assertFailedSecretWritePreservesConfiguration()
         URLProtocol.registerClass(MockOpenAIProtocol.self)
         defer { URLProtocol.unregisterClass(MockOpenAIProtocol.self) }
 
@@ -1222,8 +1242,17 @@ private final class InMemoryTranslationSecretStore: TranslationSecretStore {
     private var value: String?
 
     func load() throws -> String? { value }
-    func save(_ value: String) throws { self.value = value }
-    func clear() throws { value = nil }
+    var rejectWrites = false
+
+    func save(_ value: String) throws {
+        if rejectWrites { throw CocoaError(.fileWriteNoPermission) }
+        self.value = value
+    }
+
+    func clear() throws {
+        if rejectWrites { throw CocoaError(.fileWriteNoPermission) }
+        value = nil
+    }
 }
 
 private final class MockOpenAIProtocol: URLProtocol {
