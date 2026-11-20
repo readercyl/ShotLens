@@ -85,9 +85,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private var didRunLaunchUpdateCheck = false
 
     private var pendingSave: DispatchWorkItem?
-    private weak var dockSwitchFocusWindow: NSWindow?
-    private var dockSwitchFocusDeadline: TimeInterval = 0
-    private var dockSwitchFocusAttempts = 0
 
     private var onStartCapture: (() -> Void)?
     private var onOpenPermissions: (() -> Void)?
@@ -288,24 +285,13 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         dockSwitch.isOn = NSApp.activationPolicy() == .regular
         dockSwitch.onChange = { [weak self, weak dockSwitch] in
             guard let self, let dockSwitch else { return }
-            let showsInDock = dockSwitch.isOn
-            let policy: NSApplication.ActivationPolicy = showsInDock ? .regular : .accessory
-            let focusedWindow = NSApp.isActive && window?.isKeyWindow == true ? window : nil
-            guard NSApp.setActivationPolicy(policy) else {
-                dockSwitch.isOn = NSApp.activationPolicy() == .regular
-                showPipelineMessage("无法更改 Dock 显示", detail: "请稍后再试。")
-                return
-            }
-            UserDefaults.standard.set(showsInDock, forKey: AppDelegate.showsInDockKey)
-            guard let focusedWindow else { return }
-            // WindowServer 切换策略后还会再落一次失活（约 90ms），早于它的激活都会被吞掉，
-            // 固定延迟必然露出空窗。改为在失活回调里立刻抢回焦点。
-            focusedWindow.orderFrontRegardless()
-            dockSwitchFocusWindow = focusedWindow
-            dockSwitchFocusDeadline = ProcessInfo.processInfo.systemUptime + 0.6
-            dockSwitchFocusAttempts = 0
+            // 运行时切换激活策略会让应用掉一次前台（WindowServer 重新注册进程），
+            // 因此只保存偏好，重新启动后按新偏好生效。
+            UserDefaults.standard.set(dockSwitch.isOn, forKey: AppDelegate.showsInDockKey)
+            showPipelineMessage("在 Dock 中显示已保存", detail: "重新启动应用后生效。")
         }
         card.addArrangedSubview(makeSwitchRow("在 Dock 中显示", control: dockSwitch))
+        card.addArrangedSubview(label("修改后重新启动 ShotLens 生效", font: .systemFont(ofSize: 11), color: .secondaryLabelColor))
         card.addArrangedSubview(makeSwitchRow("开机自动启动", control: launchSwitch))
         return card
     }
@@ -1225,22 +1211,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     @objc private func appDidBecomeActive() {
         refreshStatus()
         performAutomaticUpdateCheckIfNeeded()
-    }
-
-    /// 由 AppDelegate 的 applicationDidResignActive 调用，只在 Dock 显示切换后的短时间内生效。
-    func restoreDockSwitchFocus() {
-        guard let focusedWindow = dockSwitchFocusWindow else { return }
-        guard ProcessInfo.processInfo.systemUptime < dockSwitchFocusDeadline,
-              dockSwitchFocusAttempts < 3,
-              focusedWindow.isVisible,
-              !focusedWindow.isMiniaturized else {
-            dockSwitchFocusWindow = nil
-            return
-        }
-        dockSwitchFocusAttempts += 1
-        focusedWindow.makeKey()
-        NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
-        NSApp.activate()
     }
 
     func controlTextDidChange(_ obj: Notification) {

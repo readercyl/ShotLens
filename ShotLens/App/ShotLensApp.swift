@@ -106,10 +106,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         false
     }
 
-    func applicationDidResignActive(_ notification: Notification) {
-        mainWindowController.restoreDockSwitchFocus()
-    }
-
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         openMainWindow()
         return true
