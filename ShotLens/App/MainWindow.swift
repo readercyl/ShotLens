@@ -63,11 +63,11 @@ final class SecondaryButton: NSButton {
 func applyPillButtonStyle(_ button: NSButton) {
     applySecondaryButtonStyle(button)
     if let secondary = button as? SecondaryButton {
-        secondary.preferredHeight = 24
+        secondary.preferredHeight = 22
         secondary.preferredHorizontalPadding = 12
         secondary.invalidateIntrinsicContentSize()
     }
-    button.layer?.cornerRadius = 12
+    button.layer?.cornerRadius = 11
     button.layer?.masksToBounds = true
 }
 
