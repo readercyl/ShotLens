@@ -152,14 +152,12 @@ final class ShortcutRecorder: NSView {
 
         resetButton.target = self
         resetButton.action = #selector(resetToDefault)
-        resetButton.bezelStyle = .rounded
-        resetButton.font = .systemFont(ofSize: 13, weight: .medium)
+        applySecondaryButtonStyle(resetButton)
         addSubview(resetButton)
 
         actionButton.target = self
         actionButton.action = #selector(toggleRecording)
-        actionButton.bezelStyle = .rounded
-        actionButton.font = .systemFont(ofSize: 13, weight: .medium)
+        applySecondaryButtonStyle(actionButton)
         addSubview(actionButton)
 
         updateLabel()

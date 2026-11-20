@@ -35,6 +35,18 @@ private enum SettingsStyle {
     static var cardContentWidth: CGFloat { cardWidth - 2 * cardPadding }
 }
 
+/// 次级按钮统一外观：白底、0.5 pt 描边、6 pt 圆角、12 pt 中等字重。
+func applySecondaryButtonStyle(_ button: NSButton) {
+    button.isBordered = false
+    button.wantsLayer = true
+    button.layer?.backgroundColor = NSColor.white.cgColor
+    button.layer?.cornerRadius = 6
+    button.layer?.borderWidth = 0.5
+    button.layer?.borderColor = NSColor.black.withAlphaComponent(0.10).cgColor
+    button.font = .systemFont(ofSize: 12, weight: .medium)
+    button.contentTintColor = .labelColor
+}
+
 final class MainWindowController: NSObject, NSTextFieldDelegate {
     private var applicationDisplayName: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String ?? "ShotLens"
@@ -232,8 +244,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         row.addArrangedSubview(label("版本 \(displayVersion)", font: .systemFont(ofSize: 13), color: .secondaryLabelColor))
 
         checkUpdateButton.title = "检测新版本"
-        checkUpdateButton.bezelStyle = .inline
-        checkUpdateButton.isBordered = true
+        applySecondaryButtonStyle(checkUpdateButton)
         checkUpdateButton.toolTip = "检查新版本"
         checkUpdateButton.target = self
         checkUpdateButton.action = #selector(checkForUpdatesClicked)
@@ -248,7 +259,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         row.addArrangedSubview(status)
 
         installUpdateButton.title = "升级"
-        installUpdateButton.bezelStyle = .rounded
+        applySecondaryButtonStyle(installUpdateButton)
         installUpdateButton.target = self
         installUpdateButton.action = #selector(installUpdateClicked)
         installUpdateButton.isHidden = true
@@ -264,7 +275,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         permissionStatusLabel = status
 
         let button = NSButton(title: "打开设置", target: self, action: #selector(openPermissionsClicked))
-        button.bezelStyle = .rounded
+        applySecondaryButtonStyle(button)
         button.widthAnchor.constraint(equalToConstant: 96).isActive = true
 
         let rightControl = makeRightControlContainer(width: SettingsStyle.controlWidth)
@@ -303,11 +314,11 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             // 运行时切换激活策略会让应用掉一次前台（WindowServer 重新注册进程），
             // 因此只保存偏好，重新启动后按新偏好生效。
             UserDefaults.standard.set(dockSwitch.isOn, forKey: AppDelegate.showsInDockKey)
-            showPipelineMessage("在 Dock 中显示已保存", detail: "重新启动应用后生效。")
         }
         self.dockSwitch = dockSwitch
         card.addArrangedSubview(makeSwitchRow("在菜单栏显示", control: menuBarSwitch))
         card.addArrangedSubview(makeSwitchRow("在 Dock 中显示", control: dockSwitch))
+        card.addArrangedSubview(label("重新启动后生效", font: .systemFont(ofSize: 11), color: .secondaryLabelColor))
         card.addArrangedSubview(makeSwitchRow("开机自动启动", control: launchSwitch))
         return card
     }
@@ -358,7 +369,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         let status = label("", font: .systemFont(ofSize: 12, weight: .semibold), color: .secondaryLabelColor)
         apiStatusLabel = status
         headerRow.addArrangedSubview(status)
-        toggleAPIButton.bezelStyle = .rounded
+        applySecondaryButtonStyle(toggleAPIButton)
         toggleAPIButton.target = self
         toggleAPIButton.action = #selector(toggleAPIExpandedClicked)
         toggleAPIButton.widthAnchor.constraint(equalToConstant: 64).isActive = true
@@ -393,10 +404,10 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         let actionSpacer = NSView()
         actionSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let clearButton = NSButton(title: "清空", target: self, action: #selector(clearAPISettingsClicked))
-        clearButton.bezelStyle = .rounded
+        applySecondaryButtonStyle(clearButton)
         clearButton.widthAnchor.constraint(equalToConstant: 58).isActive = true
         let testButton = NSButton(title: "测试", target: self, action: #selector(testConnectionClicked))
-        testButton.bezelStyle = .rounded
+        applySecondaryButtonStyle(testButton)
         testButton.widthAnchor.constraint(equalToConstant: 58).isActive = true
         actionRow.addArrangedSubview(actionSpacer)
         actionRow.addArrangedSubview(clearButton)
@@ -448,7 +459,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let startButton = NSButton(title: "开始截图", target: self, action: #selector(startCaptureClicked))
-        startButton.bezelStyle = .rounded
+        applySecondaryButtonStyle(startButton)
         startButton.keyEquivalent = "\r"
         startButton.widthAnchor.constraint(equalToConstant: 116).isActive = true
 
