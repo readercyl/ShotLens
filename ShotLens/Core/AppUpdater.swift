@@ -107,6 +107,12 @@ struct AppUpdater {
         guard Bundle(url: appURL)?.bundleIdentifier != "com.qingcheng.shotlens.mac.development" else {
             throw AppUpdaterError.developmentBuild
         }
+        // 脚本第一步就会因为不可写而失败，此时应用已经退出，用户会以为应用消失了。
+        let parentDirectory = appURL.deletingLastPathComponent()
+        guard FileManager.default.isWritableFile(atPath: parentDirectory.path) else {
+            throw AppUpdaterError.appNotWritable
+        }
+
         let scriptURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("shotlens-updater-\(UUID().uuidString).sh")
         try Self.updaterScript.write(to: scriptURL, atomically: true, encoding: .utf8)
@@ -158,7 +164,9 @@ struct AppUpdater {
     }
 
     private static func numericVersionParts(_ version: String) -> [Int] {
-        let normalized = version.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
+        // v1.2.3-rc1 / v1.2.3+7 这类标签按主版本号比较
+        let core = version.split(whereSeparator: { $0 == "-" || $0 == "+" }).first.map(String.init) ?? version
+        let normalized = core.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
         let parts = normalized.split(separator: ".")
         guard parts.allSatisfy({ Int($0) != nil }) else { return [] }
         return parts.compactMap { Int($0) }
@@ -301,6 +309,7 @@ struct AppUpdater {
 enum AppUpdaterError: LocalizedError {
     case downloadFailed
     case developmentBuild
+    case appNotWritable
 
     var errorDescription: String? {
         switch self {
@@ -308,6 +317,8 @@ enum AppUpdaterError: LocalizedError {
             return "下载安装包失败"
         case .developmentBuild:
             return "开发版不能安装正式更新"
+        case .appNotWritable:
+            return "当前位置没有写入权限，请把应用移到「应用程序」后再升级"
         }
     }
 }

@@ -2,6 +2,11 @@ import AppKit
 import Carbon
 
 /// 瞬译应用入口。双击启动后显示主窗口，同时保留菜单栏和全局快捷键。
+/// onProgress 在翻译管线内部回调，用引用类型记录「已经渲染过部分译文」。
+private final class PartialRenderFlag: @unchecked Sendable {
+    var value = false
+}
+
 @main
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -393,6 +398,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 outcome: "failed",
                 fields: ["error_number": String(status)]
             )
+            // 新组合注册失败时回滚默认组合，避免全局热键整体失效且用户无从发现。
+            let fallback = HotKey.default
+            if fallback.keyCode != hotKey.keyCode || fallback.modifiers != hotKey.modifiers {
+                var fallbackRef: EventHotKeyRef?
+                if RegisterEventHotKey(
+                    UInt32(fallback.keyCode),
+                    UInt32(fallback.modifiers),
+                    hotKeyID,
+                    GetEventDispatcherTarget(),
+                    0,
+                    &fallbackRef
+                ) == noErr {
+                    hotKeyRef = fallbackRef
+                    _ = fallback.save()
+                    NotificationCenter.default.post(
+                        name: ShortcutRecorder.hotKeyChangedNotification,
+                        object: fallback
+                    )
+                }
+            }
             return
         }
 
@@ -417,6 +442,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - 主流程
 
     private func handleHotKey(trigger: String = "hotkey") {
+        // 浮层还开着（含钉住状态）时，热键先关闭它，让上一次流程正常收尾。
+        if let overlay = resultOverlay {
+            overlay.requestDismiss()
+            return
+        }
         guard !isProcessing else {
             ShotLensLogger.event("capture_trigger_ignored", level: .warning, stage: "flow", outcome: "busy", fields: ["trigger": trigger])
             return
@@ -560,7 +590,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             presentPreOverlayFailure(.cropFailed, event: "display_crop_empty", error: nil)
             return false
         }
-        ClipboardManager().copyImageToClipboard(image: displayCapture.image)
+        await ClipboardManager().copyImageToClipboard(image: displayCapture.image)
         ShotLensLogger.event("selection_copied", stage: "crop", outcome: "success")
 
         let displayScale = SelectionGeometry.displayScale(
@@ -769,6 +799,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            !existingBlocks.isEmpty {
             overlay?.setTranslationProgress(existingBlocks, completedCount: mergedTranslations.compactMap { $0 }.count, totalCount: texts.count)
         }
+        let renderedPartial = PartialRenderFlag()
         let translationStartedAt = ProcessInfo.processInfo.systemUptime
         ShotLensLogger.event(
             "translation_started",
@@ -793,6 +824,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                     guard let partialBlocks = contentPlan.applyingAvailable(progressive),
                           !partialBlocks.isEmpty else { return }
+                    renderedPartial.value = true
                     overlay?.setTranslationProgress(
                         partialBlocks,
                         completedCount: progressive.compactMap { $0 }.count,
@@ -814,7 +846,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.mainWindowController.showPipelineFailure(presentation)
                 }
             }
-            overlay?.setFailure(presentation, keepsCurrentTranslation: mergedTranslations.contains { $0 != nil })
+            // 已经渲染在屏幕上的部分译文不能在失败时被抹掉
+            overlay?.setFailure(
+                presentation,
+                keepsCurrentTranslation: renderedPartial.value || mergedTranslations.contains { $0 != nil }
+            )
             return
         }
         for (offset, index) in pendingIndexes.enumerated() where offset < translationResult.translations.count {

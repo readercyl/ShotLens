@@ -140,6 +140,10 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
 
         backdropWindows.forEach { $0.orderFrontRegardless() }
         window.orderFrontRegardless()
+        // 浮层需要接收 Esc：之前从未 makeKey，keyDown 分支实际不可达
+        if window.canBecomeKey {
+            window.makeKey()
+        }
         statusWindow.orderFrontRegardless()
         pinWindow.orderFrontRegardless()
     }
@@ -421,9 +425,11 @@ final class OverlayWindow: NSObject, NSWindowDelegate {
               let image = contentView.renderToImage() else {
             return
         }
-        ClipboardManager().copyImageToClipboard(image: image)
-        ShotLensLogger.event("overlay_snapshot_copied", stage: "clipboard", outcome: "success")
-        dismiss()
+        Task { @MainActor in
+            await ClipboardManager().copyImageToClipboard(image: image)
+            ShotLensLogger.event("overlay_snapshot_copied", stage: "clipboard", outcome: "success")
+            dismiss()
+        }
     }
 
     @MainActor

@@ -57,10 +57,15 @@ private final class KeychainTranslationSecretStore: TranslationSecretStore {
         }
     }
 
-    private func addItem(with data: Data) throws {
+    private func addItem(with data: Data, account: String? = nil) throws {
         var item = baseQuery
+        if let account {
+            item[kSecAttrAccount as String] = account
+        }
         item[kSecValueData as String] = data
-        if let access = SecretKeychainAccess.makeAnyApplicationAccess() {
+        // 宽松 ACL 等价于信任任意进程，只允许开发版使用；正式版交给系统默认 ACL。
+        if Bundle.main.bundleIdentifier == "com.qingcheng.shotlens.mac.development",
+           let access = SecretKeychainAccess.makeAnyApplicationAccess() {
             item[kSecAttrAccess as String] = access
         } else {
             item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
@@ -82,8 +87,21 @@ private final class KeychainTranslationSecretStore: TranslationSecretStore {
             return
         }
 
+        // 重建失败会永久丢 Key：删除旧条目之前先确认新条目写得进去。
+        // 钥匙串里的 add 无法与现存同 account 条目共存，因此这里只做一次试探性写入到暂存账号。
+        let stagingAccount = account + "-migrating"
+        var stagingQuery = baseQuery
+        stagingQuery[kSecAttrAccount as String] = stagingAccount
+        SecItemDelete(stagingQuery as CFDictionary)
+        guard (try? addItem(with: storedData, account: stagingAccount)) != nil else { return }
+        SecItemDelete(stagingQuery as CFDictionary)
+
         guard SecItemDelete(baseQuery as CFDictionary) == errSecSuccess else { return }
-        guard (try? addItem(with: storedData)) != nil else { return }
+        guard (try? addItem(with: storedData)) != nil else {
+            // 极端情况：删掉旧条目后写不回去，把数据落回暂存账号，避免彻底丢失
+            _ = try? addItem(with: storedData, account: stagingAccount)
+            return
+        }
         defaults.set(true, forKey: Self.accessMigrationKey)
     }
 
@@ -118,6 +136,9 @@ private enum TranslationSecretStoreError: Error, ShotLensDiagnosticError {
 }
 
 struct TranslationSettings: Equatable {
+    /// 上一次读取钥匙串是否失败；失败时界面上的空 Key 不能当成用户删除。
+    static var lastLoadFailed = false
+
     static let didChangeNotification = Notification.Name("ShotLensTranslationSettingsDidChange")
     static let apiEndpointKey = "ShotLens_LLM_APIEndpoint"
     static let apiKeyKey = "ShotLens_LLM_APIKey"
@@ -195,6 +216,8 @@ struct TranslationSettings: Equatable {
         do {
             let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
             if key.isEmpty {
+                // 钥匙串读取失败时界面上的空 Key 不是用户意图，不能当成删除
+                guard !Self.lastLoadFailed else { return false }
                 try Self.secretStore.clear()
             } else {
                 try Self.secretStore.save(key)
@@ -254,10 +277,13 @@ struct TranslationSettings: Equatable {
     private static func loadAPIKey(defaults: UserDefaults) -> String {
         do {
             if let key = try secretStore.load(), !key.isEmpty {
+                TranslationSettings.lastLoadFailed = false
                 defaults.removeObject(forKey: apiKeyKey)
                 return key
             }
+            TranslationSettings.lastLoadFailed = false
         } catch {
+            Self.lastLoadFailed = true
             ShotLensLogger.event("api_key_load_failed", level: .error, stage: "settings", outcome: "failed", error: error)
         }
 

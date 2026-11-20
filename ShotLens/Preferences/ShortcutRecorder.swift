@@ -3,6 +3,9 @@ import Carbon
 
 /// 全局快捷键的数据模型
 struct HotKey: Codable, Equatable {
+    /// 注册后会全局截获、拿走系统菜单快捷键的组合：⌘Q/⌘W/⌘H/⌘M/⌘Tab/⌘Space/⌘Delete/⌘Esc。
+    static let systemReservedKeyCodes: Set<Int> = [12, 13, 4, 46, 48, 49, 51, 53]
+
     var keyCode: Int
     var modifiers: Int
 
@@ -64,12 +67,13 @@ struct HotKey: Codable, Equatable {
     }
 
     private func keyCodeToDisplayString(_ code: Int) -> String? {
-        let source = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue()
-        guard let layoutData = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
+        guard let source = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let layoutData = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
             return nil
         }
         let dataRef = unsafeBitCast(layoutData, to: CFData.self)
-        let ptr = CFDataGetBytePtr(dataRef).withMemoryRebound(to: UCKeyboardLayout.self, capacity: 1) { $0 }
+        guard let rawPointer = CFDataGetBytePtr(dataRef) else { return nil }
+        let ptr = rawPointer.withMemoryRebound(to: UCKeyboardLayout.self, capacity: 1) { $0 }
 
         var deadKeyState: UInt32 = 0
         let maxChars = 4
@@ -278,6 +282,13 @@ final class ShortcutRecorder: NSView {
         }
 
         let keyCode = Int(event.keyCode)
+        // ⌘Q/⌘W/⌘H/⌘M 等系统保留组合注册后会全局截获，直接拒绝
+        if modifiers & Int(cmdKey) != 0,
+           HotKey.systemReservedKeyCodes.contains(keyCode) {
+            recordingHint = "该组合不可用"
+            updateLabel()
+            return true
+        }
         currentHotKey = HotKey(keyCode: keyCode, modifiers: modifiers)
         stopRecording()
         window?.makeFirstResponder(nil)

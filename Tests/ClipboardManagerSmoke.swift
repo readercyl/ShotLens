@@ -4,7 +4,7 @@ import CoreGraphics
 @main
 struct ClipboardManagerSmoke {
     @MainActor
-    static func main() throws {
+    static func main() async throws {
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let context = CGContext(
             data: nil,
@@ -24,7 +24,7 @@ struct ClipboardManagerSmoke {
         }
 
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("ShotLensClipboardTest-\(UUID().uuidString)"))
-        ClipboardManager().copyImageToClipboard(image: image, pasteboard: pasteboard)
+        await ClipboardManager().copyImageToClipboard(image: image, pasteboard: pasteboard)
 
         guard let pngData = pasteboard.data(forType: .png),
               let bitmap = NSBitmapImageRep(data: pngData),

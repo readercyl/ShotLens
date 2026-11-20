@@ -326,6 +326,11 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         menuBarSwitch.isOn = AppDelegate.showsInMenuBar
         menuBarSwitch.onChange = { [weak self, weak menuBarSwitch] in
             guard let self, let menuBarSwitch else { return }
+            guard menuBarSwitch.isOn || savedShowsInDock else {
+                menuBarSwitch.isOn = true
+                showPipelineMessage("至少保留一个入口", detail: "Dock 和菜单栏不能同时关闭。")
+                return
+            }
             AppDelegate.shared?.setMenuBarVisibility(menuBarSwitch.isOn)
         }
         self.menuBarSwitch = menuBarSwitch
@@ -334,6 +339,12 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         dockSwitch.isOn = savedShowsInDock
         dockSwitch.onChange = { [weak self, weak dockSwitch] in
             guard let self, let dockSwitch else { return }
+            // Dock 与菜单栏至少保留一个入口，否则重启后既没有图标也没有菜单。
+            guard dockSwitch.isOn || AppDelegate.showsInMenuBar else {
+                dockSwitch.isOn = true
+                showPipelineMessage("至少保留一个入口", detail: "Dock 和菜单栏不能同时关闭。")
+                return
+            }
             // 运行时切换激活策略会让应用掉一次前台（WindowServer 重新注册进程），
             // 因此只保存偏好，重新启动后按新偏好生效。
             UserDefaults.standard.set(dockSwitch.isOn, forKey: AppDelegate.showsInDockKey)
@@ -1014,7 +1025,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     private func beginInstalling(_ update: AppUpdate) {
         checkUpdateButton.isEnabled = false
-        checkUpdateButton.isEnabled = false
         updateStatusLabel?.stringValue = "下载中…"
         updateStatusLabel?.textColor = .secondaryLabelColor
 
@@ -1029,7 +1039,10 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
                         controller.updateStatusLabel?.stringValue = "安装中…"
                         try updater.installDownloadedUpdate(from: dmgURL)
                     } catch {
-                        controller.showUpdateInstallFailure(reason: "无法启动安装程序")
+                        // 安装未开始就失败：清掉残留安装包，并显示真实原因
+                        try? FileManager.default.removeItem(at: dmgURL)
+                        let reason = (error as? AppUpdaterError)?.errorDescription ?? "无法启动安装程序"
+                        controller.showUpdateInstallFailure(reason: reason)
                     }
                 }
             } catch {
