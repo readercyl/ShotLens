@@ -284,14 +284,30 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         let dockSwitch = SettingsSwitchControl(frame: .zero)
         dockSwitch.isOn = NSApp.activationPolicy() == .regular
         dockSwitch.onChange = { [weak self, weak dockSwitch] in
-            guard let dockSwitch else { return }
+            guard let self, let dockSwitch else { return }
             let showsInDock = dockSwitch.isOn
-            guard NSApp.setActivationPolicy(showsInDock ? .regular : .accessory) else {
+            let policy: NSApplication.ActivationPolicy = showsInDock ? .regular : .accessory
+            let focusedWindow = NSApp.isActive && window?.isKeyWindow == true ? window : nil
+            guard NSApp.setActivationPolicy(policy) else {
                 dockSwitch.isOn = NSApp.activationPolicy() == .regular
-                self?.showPipelineMessage("无法更改 Dock 显示", detail: "请稍后再试。")
+                showPipelineMessage("无法更改 Dock 显示", detail: "请稍后再试。")
                 return
             }
             UserDefaults.standard.set(showsInDock, forKey: AppDelegate.showsInDockKey)
+            // Keep the window in front while WindowServer settles the policy change.
+            guard let focusedWindow else { return }
+            focusedWindow.orderFrontRegardless()
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(150)) { [weak focusedWindow] in
+                guard let focusedWindow, focusedWindow.isVisible, !focusedWindow.isMiniaturized,
+                      NSApp.activationPolicy() == policy,
+                      NSApp.keyWindow == nil || NSApp.keyWindow === focusedWindow else { return }
+                focusedWindow.orderFrontRegardless()
+                focusedWindow.makeKey()
+                if !NSApp.isActive {
+                    NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
+                    NSApp.activate()
+                }
+            }
         }
         card.addArrangedSubview(makeSwitchRow("在 Dock 中显示", control: dockSwitch))
         card.addArrangedSubview(makeSwitchRow("开机自动启动", control: launchSwitch))
