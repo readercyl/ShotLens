@@ -44,7 +44,7 @@ func setSecondaryButtonTitle(_ button: NSButton, _ title: String) {
 /// 次级按钮：白底细描边按钮，宽度跟随标题（左右各 10 pt 内边距），高 22 pt。
 final class SecondaryButton: NSButton {
     static let horizontalPadding: CGFloat = 10
-    static let buttonHeight: CGFloat = 22
+    static let buttonHeight: CGFloat = 26
 
     override var intrinsicContentSize: NSSize {
         let base = super.intrinsicContentSize
@@ -266,7 +266,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         checkUpdateButton.target = self
         checkUpdateButton.action = #selector(checkForUpdatesClicked)
         checkUpdateButton.translatesAutoresizingMaskIntoConstraints = false
-        checkUpdateButton.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        checkUpdateButton.heightAnchor.constraint(equalToConstant: SecondaryButton.buttonHeight).isActive = true
         row.addArrangedSubview(checkUpdateButton)
 
         let status = label("", font: .systemFont(ofSize: 13), color: .secondaryLabelColor)
