@@ -188,21 +188,28 @@ struct AppUpdater {
     test -d "$APP_PATH"
     test -w "$APP_PARENT"
     APP_EXECUTABLE="$APP_PATH/Contents/MacOS/ShotLens"
+    app_is_running() {
+      ps -axww -o comm= | awk -v path="$APP_EXECUTABLE" '$0 == path { found=1 } END { exit !found }'
+    }
     for _ in $(seq 1 40); do
-      if ! pgrep -f "$APP_EXECUTABLE" >/dev/null 2>&1; then
+      if ! app_is_running; then
         break
       fi
       sleep 0.25
     done
-    if pgrep -f "$APP_EXECUTABLE" >/dev/null 2>&1; then
+    if app_is_running; then
       log "old app process still running"
       exit 1
     fi
 
     MOUNT_DIR="$(mktemp -d)"
+    READY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/shotlens-ready.XXXXXXXX")"
+    READY_FILE="$READY_DIR/ready"
     cleanup() {
       hdiutil detach "$MOUNT_DIR" -quiet 2>/dev/null || true
       rmdir "$MOUNT_DIR" 2>/dev/null || true
+      rm -f "$READY_FILE"
+      rmdir "$READY_DIR" 2>/dev/null || true
       rm -rf "$STAGING_APP" 2>/dev/null || true
     }
     trap cleanup EXIT
@@ -240,14 +247,32 @@ struct AppUpdater {
     fi
     xattr -dr com.apple.quarantine "$APP_PATH" 2>/dev/null || true
     log "launching app"
-    if ! /usr/bin/open -n "$APP_PATH"; then
+    if /usr/bin/open -n "$APP_PATH" --args --shotlens-update-ready "$READY_FILE"; then
+      for _ in $(seq 1 40); do
+        if [[ -s "$READY_FILE" ]]; then
+          READY_PID="$(cat "$READY_FILE")"
+          if [[ "$READY_PID" =~ ^[1-9][0-9]*$ ]]; then
+            sleep 1
+            if [[ "$(ps -p "$READY_PID" -ww -o comm=)" == "$APP_EXECUTABLE" ]]; then
+              rm -rf "$BACKUP_APP"
+              rm -f "$DMG_PATH"
+              log "update complete"
+              exit 0
+            fi
+          fi
+          break
+        fi
+        sleep 0.25
+      done
+    fi
+    if app_is_running; then
+      log "startup not confirmed; running app untouched, backup retained at $BACKUP_APP"
+    else
+      log "startup not confirmed; rolling back"
       restore_backup
       /usr/bin/open -n "$APP_PATH" 2>/dev/null || true
-      exit 1
     fi
-    rm -rf "$BACKUP_APP"
-    rm -f "$DMG_PATH"
-    log "update complete"
+    exit 1
     """
 
     private struct GitHubRelease: Decodable {

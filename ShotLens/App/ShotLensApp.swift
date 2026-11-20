@@ -80,6 +80,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         openMainWindow()
+        DispatchQueue.main.async {
+            AppDelegate.signalUpdateReady()
+        }
+    }
+
+    private static func signalUpdateReady() {
+        let arguments = CommandLine.arguments
+        guard arguments.count == 3, arguments[1] == "--shotlens-update-ready" else { return }
+        let marker = URL(fileURLWithPath: arguments[2])
+        let directory = marker.deletingLastPathComponent()
+        let tempDirectory = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().path
+        guard marker.lastPathComponent == "ready",
+              directory.lastPathComponent.hasPrefix("shotlens-ready."),
+              directory.deletingLastPathComponent().resolvingSymlinksInPath().path == tempDirectory else { return }
+        let pid = String(ProcessInfo.processInfo.processIdentifier)
+        do {
+            try pid.write(to: marker, atomically: true, encoding: .utf8)
+        } catch {
+            ShotLensLogger.event("update_ready_signal_failed", level: .error, stage: "update", outcome: "failed", error: error)
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

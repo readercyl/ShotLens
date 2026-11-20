@@ -43,6 +43,13 @@ struct AppUpdaterSmoke {
                 throw TestFailure("Expected updater rollback contract to contain: \(required)")
             }
         }
+        guard let readyCheck = script.range(of: "[[ -s \"$READY_FILE\" ]]"),
+              let processCheck = script.range(of: "ps -p \"$READY_PID\""),
+              let backupRemoval = script.range(of: "rm -rf \"$BACKUP_APP\""),
+              readyCheck.lowerBound < processCheck.lowerBound,
+              processCheck.lowerBound < backupRemoval.lowerBound else {
+            throw TestFailure("Backup removal must wait for the new app to confirm it is running")
+        }
         guard !script.contains("rm -rf \"$APP_PATH\"\n    ditto") else {
             throw TestFailure("Updater must not delete the installed app before staging succeeds")
         }
