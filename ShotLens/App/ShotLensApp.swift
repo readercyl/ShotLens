@@ -233,12 +233,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(startCaptureFromMenu),
             keyEquivalent: ""
         ))
-        menu.addItem(.separator())
-        menu.addItem(NSMenuItem(
-            title: "设置",
-            action: #selector(openPreferencesMenuItem),
-            keyEquivalent: ","
-        ))
         menu.addItem(NSMenuItem(
             title: "打开屏幕录制权限",
             action: #selector(openPermissionsMenuItem),
@@ -246,7 +240,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(
-            title: "退出瞬译",
+            title: "设置",
+            action: #selector(openPreferencesMenuItem),
+            keyEquivalent: ","
+        ))
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(
+            title: "退出应用",
             action: #selector(quitApp),
             keyEquivalent: "q"
         ))

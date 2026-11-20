@@ -87,7 +87,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private var pendingSave: DispatchWorkItem?
     private var dockSwitch: SettingsSwitchControl?
     private var menuBarSwitch: SettingsSwitchControl?
-    private weak var dockCaptionLabel: NSTextField?
 
     /// 偏好是下次启动生效的依据，开关状态以此为准，不读当前运行中的策略。
     private var savedShowsInDock: Bool {
@@ -294,7 +293,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         menuBarSwitch.onChange = { [weak self, weak menuBarSwitch] in
             guard let self, let menuBarSwitch else { return }
             AppDelegate.shared?.setMenuBarVisibility(menuBarSwitch.isOn)
-            updateDockCaption()
         }
         self.menuBarSwitch = menuBarSwitch
 
@@ -305,27 +303,13 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             // 运行时切换激活策略会让应用掉一次前台（WindowServer 重新注册进程），
             // 因此只保存偏好，重新启动后按新偏好生效。
             UserDefaults.standard.set(dockSwitch.isOn, forKey: AppDelegate.showsInDockKey)
-            updateDockCaption()
             showPipelineMessage("在 Dock 中显示已保存", detail: "重新启动应用后生效。")
         }
         self.dockSwitch = dockSwitch
         card.addArrangedSubview(makeSwitchRow("在菜单栏显示", control: menuBarSwitch))
         card.addArrangedSubview(makeSwitchRow("在 Dock 中显示", control: dockSwitch))
-        let caption = label("修改后重新启动 ShotLens 生效", font: .systemFont(ofSize: 11), color: .secondaryLabelColor)
-        dockCaptionLabel = caption
-        card.addArrangedSubview(caption)
         card.addArrangedSubview(makeSwitchRow("开机自动启动", control: launchSwitch))
-        updateDockCaption()
         return card
-    }
-
-    /// Dock 与菜单栏都关闭时提示唯一入口，其余情况说明 Dock 开关的生效时机。
-    private func updateDockCaption() {
-        let bothHidden = !savedShowsInDock && !AppDelegate.showsInMenuBar
-        dockCaptionLabel?.stringValue = bothHidden
-            ? "Dock 和菜单栏都已关闭，之后只能从「应用程序」文件夹打开"
-            : "修改后重新启动 ShotLens 生效"
-        dockCaptionLabel?.textColor = bothHidden ? .systemOrange : .secondaryLabelColor
     }
 
     private func makeSwitchRow(_ title: String, control: SettingsSwitchControl) -> NSView {
@@ -461,7 +445,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         row.spacing = 10
         row.widthAnchor.constraint(equalToConstant: SettingsStyle.cardWidth).isActive = true
 
-        let hint = label("设置会自动保存", font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let startButton = NSButton(title: "开始截图", target: self, action: #selector(startCaptureClicked))
@@ -469,7 +452,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         startButton.keyEquivalent = "\r"
         startButton.widthAnchor.constraint(equalToConstant: 116).isActive = true
 
-        row.addArrangedSubview(hint)
         row.addArrangedSubview(spacer)
         row.addArrangedSubview(startButton)
         return row
@@ -740,7 +722,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         launchAtLoginSwitch?.isOn = launchAtLoginEnabled
         dockSwitch?.isOn = savedShowsInDock
         menuBarSwitch?.isOn = AppDelegate.showsInMenuBar
-        updateDockCaption()
 
         // 不自动测试，等用户手动点击「测试」按钮
         connectionState = .untested
