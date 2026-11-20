@@ -85,6 +85,12 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     private var didRunLaunchUpdateCheck = false
 
     private var pendingSave: DispatchWorkItem?
+    private var dockSwitch: SettingsSwitchControl?
+
+    /// 偏好是下次启动生效的依据，开关状态以此为准，不读当前运行中的策略。
+    private var savedShowsInDock: Bool {
+        UserDefaults.standard.object(forKey: AppDelegate.showsInDockKey) as? Bool ?? true
+    }
 
     private var onStartCapture: (() -> Void)?
     private var onOpenPermissions: (() -> Void)?
@@ -282,7 +288,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         launchAtLoginSwitch = launchSwitch
 
         let dockSwitch = SettingsSwitchControl(frame: .zero)
-        dockSwitch.isOn = NSApp.activationPolicy() == .regular
+        dockSwitch.isOn = savedShowsInDock
         dockSwitch.onChange = { [weak self, weak dockSwitch] in
             guard let self, let dockSwitch else { return }
             // 运行时切换激活策略会让应用掉一次前台（WindowServer 重新注册进程），
@@ -290,6 +296,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
             UserDefaults.standard.set(dockSwitch.isOn, forKey: AppDelegate.showsInDockKey)
             showPipelineMessage("在 Dock 中显示已保存", detail: "重新启动应用后生效。")
         }
+        self.dockSwitch = dockSwitch
         card.addArrangedSubview(makeSwitchRow("在 Dock 中显示", control: dockSwitch))
         card.addArrangedSubview(label("修改后重新启动 ShotLens 生效", font: .systemFont(ofSize: 11), color: .secondaryLabelColor))
         card.addArrangedSubview(makeSwitchRow("开机自动启动", control: launchSwitch))
@@ -706,6 +713,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         updateApiKeyEyeIcon()
         modelField.stringValue = settings.model
         launchAtLoginSwitch?.isOn = launchAtLoginEnabled
+        dockSwitch?.isOn = savedShowsInDock
 
         // 不自动测试，等用户手动点击「测试」按钮
         connectionState = .untested
