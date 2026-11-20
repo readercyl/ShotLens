@@ -52,6 +52,13 @@ final class SecondaryButton: NSButton {
     }
 }
 
+/// 版本行专用胶囊按键：与主模块的方角控件区分。
+func applyPillButtonStyle(_ button: NSButton) {
+    applySecondaryButtonStyle(button)
+    button.layer?.cornerRadius = SecondaryButton.buttonHeight / 2
+    button.layer?.masksToBounds = true
+}
+
 /// 次级按钮统一外观：白底、0.5 pt 描边、6 pt 圆角、13 pt 中等字重。
 func applySecondaryButtonStyle(_ button: NSButton) {
     button.isBordered = false
@@ -261,7 +268,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         row.addArrangedSubview(label("版本 \(displayVersion)", font: .systemFont(ofSize: 13), color: .secondaryLabelColor))
 
         setSecondaryButtonTitle(checkUpdateButton, "检测新版本")
-        applySecondaryButtonStyle(checkUpdateButton)
+        applyPillButtonStyle(checkUpdateButton)
         checkUpdateButton.toolTip = "检查新版本"
         checkUpdateButton.target = self
         checkUpdateButton.action = #selector(checkForUpdatesClicked)
@@ -275,7 +282,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         row.addArrangedSubview(status)
 
         installUpdateButton.title = "升级"
-        applySecondaryButtonStyle(installUpdateButton)
+        applyPillButtonStyle(installUpdateButton)
         installUpdateButton.target = self
         installUpdateButton.action = #selector(installUpdateClicked)
         installUpdateButton.isHidden = true
@@ -418,8 +425,10 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         actionSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let clearButton = SecondaryButton(title: "清空", target: self, action: #selector(clearAPISettingsClicked))
         applySecondaryButtonStyle(clearButton)
+        clearButton.widthAnchor.constraint(equalToConstant: 68).isActive = true
         let testButton = SecondaryButton(title: "测试", target: self, action: #selector(testConnectionClicked))
         applySecondaryButtonStyle(testButton)
+        testButton.widthAnchor.constraint(equalToConstant: 68).isActive = true
         actionRow.addArrangedSubview(actionSpacer)
         actionRow.addArrangedSubview(clearButton)
         actionRow.addArrangedSubview(testButton)
