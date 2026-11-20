@@ -298,7 +298,6 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
 
     private func makeAPICard() -> NSView {
         let card = makeCard()
-        card.spacing = 10
         let headerRow = NSStackView()
         headerRow.orientation = .horizontal
         headerRow.alignment = .centerY
@@ -318,6 +317,7 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
         toggleAPIButton.widthAnchor.constraint(equalToConstant: 64).isActive = true
         headerRow.addArrangedSubview(toggleAPIButton)
         card.addArrangedSubview(headerRow)
+        card.setCustomSpacing(10, after: headerRow)
 
         let statusDetail = label("", font: .systemFont(ofSize: 12), color: .secondaryLabelColor)
         statusDetail.lineBreakMode = .byWordWrapping
@@ -366,7 +366,13 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     }
 
     private func makePipelineMessage() -> NSStackView {
-        let container = makeCard()
+        let container = NSStackView()
+        container.orientation = .vertical
+        container.alignment = .leading
+        container.distribution = .fill
+        container.widthAnchor.constraint(equalToConstant: 398).isActive = true
+        container.wantsLayer = true
+        container.layer?.cornerRadius = 11
         container.spacing = 3
         container.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
         container.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.08).cgColor
@@ -408,14 +414,14 @@ final class MainWindowController: NSObject, NSTextFieldDelegate {
     }
 
     private func makeCard(title: String? = nil, symbol: String = "") -> NSStackView {
-        let card = NSStackView()
+        let card = SettingsCardStackView()
         card.orientation = .vertical
         card.alignment = .leading
         card.distribution = .fill
         card.spacing = 8
         card.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
         card.wantsLayer = true
-        card.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.035).cgColor
+        card.updateBackground()
         card.layer?.cornerRadius = 11
         card.widthAnchor.constraint(equalToConstant: 398).isActive = true
         if let title {
@@ -1225,6 +1231,19 @@ private enum ModelListFetchError: Error, ShotLensDiagnosticError {
         case .httpStatus(let statusCode):
             return ["http_status": String(statusCode)]
         }
+    }
+}
+
+private final class SettingsCardStackView: NSStackView {
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateBackground()
+    }
+
+    func updateBackground() {
+        let isDark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let tint: NSColor = isDark ? .white : .black
+        layer?.backgroundColor = tint.withAlphaComponent(0.035).cgColor
     }
 }
 
