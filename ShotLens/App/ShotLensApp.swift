@@ -150,16 +150,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - 主菜单
 
     private func setupMainMenu() {
+        let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+            ?? "ShotLens"
         let mainMenu = NSMenu()
         NSApp.mainMenu = mainMenu
 
         // ── 应用菜单 ──
         let appMenu = NSMenu()
-        let appMenuItem = mainMenu.addItem(withTitle: "ShotLens", action: nil, keyEquivalent: "")
+        let appMenuItem = mainMenu.addItem(withTitle: appName, action: nil, keyEquivalent: "")
         appMenuItem.submenu = appMenu
-        appMenu.addItem(withTitle: "关于 ShotLens", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "关于 \(appName)", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "退出 ShotLens", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "设置…", action: #selector(openPreferencesMenuItem), keyEquivalent: ",")
+        appMenu.addItem(.separator())
+        let servicesItem = appMenu.addItem(withTitle: "服务", action: nil, keyEquivalent: "")
+        let servicesMenu = NSMenu(title: "服务")
+        servicesItem.submenu = servicesMenu
+        NSApp.servicesMenu = servicesMenu
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "隐藏 \(appName)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthersItem = appMenu.addItem(withTitle: "隐藏其他", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthersItem.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(withTitle: "显示全部", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "退出 \(appName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
         // ── 编辑菜单（Cmd+V/Cmd+C/Cmd+X 依赖这个）──
         let editMenu = NSMenu(title: "编辑")
@@ -172,6 +186,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(withTitle: "拷贝", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+
+        // ── 窗口菜单 ──
+        let windowMenuItem = mainMenu.addItem(withTitle: "窗口", action: nil, keyEquivalent: "")
+        let windowMenu = NSMenu(title: "窗口")
+        windowMenuItem.submenu = windowMenu
+        windowMenu.addItem(withTitle: "最小化", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "关闭", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        NSApp.windowsMenu = windowMenu
     }
 
     // MARK: - 菜单栏
