@@ -7,6 +7,12 @@ import Carbon
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private static var retainedDelegate: AppDelegate?
     nonisolated static let showsInDockKey = "ShotLens_ShowsInDock"
+    nonisolated static let showsInMenuBarKey = "ShotLens_ShowsInMenuBar"
+
+    /// 菜单栏图标偏好；默认显示。
+    nonisolated static var showsInMenuBar: Bool {
+        UserDefaults.standard.object(forKey: showsInMenuBarKey) as? Bool ?? true
+    }
 
     private static let legacyDefaultsSuiteName = "com.qingcheng.shotlens"
     private static let legacyDefaultsMigrationKey = "ShotLens_DidMigrateLegacyDefaults"
@@ -26,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var activeRun: ShotLensRunContext?
     private var isRecordingShortcut = false
     /// 弱引用 self 供 C 回调使用
-    private static var shared: AppDelegate?
+    nonisolated(unsafe) static var shared: AppDelegate?
 
     static func main() {
         migrateLegacyDefaultsIfNeeded()
@@ -198,9 +204,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - 菜单栏
 
+    /// 菜单栏图标与 Dock 图标各自独立，可只留其中一个。
+    nonisolated func setMenuBarVisibility(_ visible: Bool) {
+        UserDefaults.standard.set(visible, forKey: Self.showsInMenuBarKey)
+        MainActor.assumeIsolated { statusItem?.isVisible = visible }
+    }
+
     private func setupMenuBar() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.isVisible = true
+        item.isVisible = Self.showsInMenuBar
 
         if let button = item.button {
             button.image = makeMenuBarTemplateIcon()
